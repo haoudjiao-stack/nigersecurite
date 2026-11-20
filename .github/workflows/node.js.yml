@@ -23,7 +23,7 @@ jobs:
           java-version: 21
 
       - name: Installer les dépendances
-        run: npm install
+        run: npm install --legacy-peer-deps
 
       - name: Tester les règles Firestore
         run: npm run test:rules
