@@ -24,6 +24,9 @@ jobs:
 
       - name: Installer les dépendances
         run: npm install --legacy-peer-deps
-
-      - name: Tester les règles Firestore
+      
+      - name: Installer Firebase CLI
+        run: npm install --global firebase-tools
+      
+      - name: Tester les règles Firestore      
         run: npm run test:rules
