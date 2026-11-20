@@ -1,0 +1,306 @@
+import React, { useState } from 'react';
+import {
+  Compass,
+  MapPin,
+  ShieldCheck,
+  CheckCircle2,
+  AlertTriangle,
+  Clock,
+  Camera,
+  Plus,
+  Radio,
+  UserCheck,
+  Building,
+  Smartphone,
+  Shield,
+  Image as ImageIcon,
+  User,
+} from 'lucide-react';
+import { SiteGardiennage, AgentSecurite, RapportControle, ControleurProfile } from '../types';
+import { CONTROLEURS_LIST } from '../mockData';
+
+interface ControleurSpaceProps {
+  sites: SiteGardiennage[];
+  agents: AgentSecurite[];
+  reports: RapportControle[];
+  onOpenNewReport: (defaultSiteId?: string) => void;
+  activeController: ControleurProfile;
+  onChangeController: (ctrl: ControleurProfile) => void;
+}
+
+export const ControleurSpace: React.FC<ControleurSpaceProps> = ({
+  sites,
+  agents,
+  reports,
+  onOpenNewReport,
+  activeController,
+  onChangeController,
+}) => {
+  // CRITICAL: Filter sites strictly assigned to this controller
+  const assignedSites = sites.filter((s) =>
+    activeController.sitesAssignesIds.includes(s.id)
+  );
+
+  // Filter reports submitted by this controller or for his sites
+  const controllerReports = reports.filter(
+    (r) =>
+      r.controleurNom.toLowerCase().includes(activeController.nom.toLowerCase()) ||
+      activeController.sitesAssignesIds.includes(r.siteId)
+  );
+
+  const compliantCount = assignedSites.filter((s) => s.statutConformite === 'Conforme').length;
+  const pendingCount = assignedSites.filter((s) => s.statutConformite === 'Non contrôlé aujourd’hui').length;
+  const anomalyCount = assignedSites.filter((s) => s.statutConformite === 'Anomalie signalée').length;
+
+  return (
+    <div className="space-y-6 animate-in fade-in">
+      {/* Simulation & Security Notice */}
+      <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex items-start gap-2.5">
+        <Shield className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+        <div>
+          <p className="font-bold text-amber-300">
+            Espace Contrôleur Terrain (Cloisonnement des accès strict) :
+          </p>
+          <p className="mt-0.5 text-amber-200/90 leading-relaxed">
+            Cet espace n'a accès <strong>qu'aux {assignedSites.length} sites attribués</strong> à votre secteur de patrouille.
+            Tout accès aux salaires des agents, factures clients, trésorerie et paramètres de l'entreprise est strictement masqué et verrouillé.
+          </p>
+        </div>
+      </div>
+
+      {/* Controller Profile Banner */}
+      <div className="p-5 rounded-2xl bg-gradient-to-r from-emerald-950 via-slate-900 to-slate-900 border border-emerald-500/30 shadow-xl">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-3 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+              <Compass className="w-7 h-7" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  Patrouille & Contrôle Terrain
+                </span>
+                <span className="text-xs text-slate-400 flex items-center gap-1 font-mono">
+                  <Radio className="w-3 h-3 text-emerald-400 animate-pulse" />
+                  Niamey
+                </span>
+              </div>
+              <h2 className="text-lg sm:text-xl font-black text-white mt-1">
+                {activeController.nom}
+              </h2>
+              <p className="text-xs text-slate-300">
+                {activeController.grade} • Zone : <span className="text-emerald-400 font-semibold">{activeController.zonePatrouille}</span>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
+            {/* Quick controller selector to demonstrate site assignment */}
+            <div className="w-full sm:w-auto">
+              <label className="block text-[10px] text-slate-400 mb-1">Changer de contrôleur (Simulation) :</label>
+              <select
+                value={activeController.id}
+                onChange={(e) => {
+                  const found = CONTROLEURS_LIST.find((c) => c.id === e.target.value);
+                  if (found) onChangeController(found);
+                }}
+                className="w-full sm:w-auto bg-slate-800 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white"
+              >
+                {CONTROLEURS_LIST.map((ctrl) => (
+                  <option key={ctrl.id} value={ctrl.id}>
+                    {ctrl.nom} ({ctrl.zonePatrouille})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              onClick={() => onOpenNewReport()}
+              className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white font-bold text-xs shadow-lg shadow-emerald-950/60 flex items-center justify-center gap-1.5 transition cursor-pointer self-end"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Nouveau Contrôle</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Stats for Assigned Sites Only */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="p-3 sm:p-4 rounded-xl bg-slate-900 border border-slate-800 text-center">
+          <p className="text-xs font-semibold text-slate-400">Sites Attribués</p>
+          <p className="text-xl sm:text-2xl font-black text-white mt-1">{assignedSites.length}</p>
+          <p className="text-[10px] text-slate-500 mt-0.5">Dans votre secteur</p>
+        </div>
+
+        <div className="p-3 sm:p-4 rounded-xl bg-slate-900 border border-slate-800 text-center">
+          <p className="text-xs font-semibold text-slate-400">Sites Conformes</p>
+          <p className="text-xl sm:text-2xl font-black text-emerald-400 mt-1">{compliantCount}</p>
+          <p className="text-[10px] text-slate-500 mt-0.5">Ronde validée</p>
+        </div>
+
+        <div className="p-3 sm:p-4 rounded-xl bg-slate-900 border border-slate-800 text-center">
+          <p className="text-xs font-semibold text-slate-400">Anomalies / À visiter</p>
+          <p className="text-xl sm:text-2xl font-black text-amber-400 mt-1">{anomalyCount + pendingCount}</p>
+          <p className="text-[10px] text-amber-300 mt-0.5">À surveiller</p>
+        </div>
+      </div>
+
+      {/* Sites List - STRICTLY ASSIGNED TO THIS CONTROLLER */}
+      <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-white text-base">Mes Sites Attribués ({assignedSites.length})</h3>
+            <p className="text-xs text-slate-400">Vous ne pouvez contrôler et inspecter que les postes de votre zone</p>
+          </div>
+          <span className="text-[10px] px-2 py-0.5 rounded font-mono bg-slate-800 text-slate-300 border border-slate-700">
+            {activeController.zonePatrouille}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {assignedSites.map((site) => (
+            <div
+              key={site.id}
+              className="p-4 rounded-xl bg-slate-800/50 border border-slate-800 hover:border-slate-700 transition flex flex-col justify-between gap-3"
+            >
+              <div>
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="font-bold text-white text-sm">{site.nom}</h4>
+                  <span
+                    className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase border ${
+                      site.statutConformite === 'Conforme'
+                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                        : site.statutConformite === 'Anomalie signalée'
+                        ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                        : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                    }`}
+                  >
+                    {site.statutConformite}
+                  </span>
+                </div>
+
+                <div className="mt-1.5 flex items-center gap-2 text-xs text-slate-400">
+                  <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span>{site.quartier}, {site.ville}</span>
+                </div>
+
+                <p className="text-xs text-slate-300 mt-2 line-clamp-2">
+                  <span className="text-slate-400 font-medium">Consignes :</span> {site.consignesParticulieres}
+                </p>
+              </div>
+
+              <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-xs">
+                <div className="text-slate-400">
+                  Vigiles au poste : <span className="font-bold text-white">{site.effectifActuel}</span> / {site.postesRequis}
+                </div>
+                <button
+                  onClick={() => onOpenNewReport(site.id)}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600/30 hover:bg-emerald-600 text-emerald-300 hover:text-white font-medium text-xs transition cursor-pointer flex items-center gap-1"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Contrôler ce site</span>
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Reports Transmitted by Controller to Direction */}
+      <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-white text-base">Rapports Transmis à la Direction</h3>
+            <p className="text-xs text-slate-400">Historique de vos passages et photos jointes</p>
+          </div>
+          <span className="text-xs text-slate-400">{controllerReports.length} rapports transmis</span>
+        </div>
+
+        <div className="space-y-3">
+          {controllerReports.map((rep) => (
+            <div
+              key={rep.id}
+              className={`p-4 rounded-xl border space-y-2.5 ${
+                rep.incidentSignale
+                  ? 'bg-rose-950/20 border-rose-500/40 text-rose-100'
+                  : 'bg-slate-800/40 border-slate-800 text-slate-300'
+              }`}
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-white text-sm">{rep.siteNom}</span>
+                  <span className="text-[11px] text-slate-400">({rep.quartier})</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-400 font-mono text-[11px]">{rep.dateHeure}</span>
+                  <span
+                    className={`text-[10px] px-2 py-0.5 rounded font-bold ${
+                      rep.incidentSignale
+                        ? 'bg-rose-500/20 text-rose-300'
+                        : 'bg-emerald-500/20 text-emerald-300'
+                    }`}
+                  >
+                    {rep.statut}
+                  </span>
+                </div>
+              </div>
+
+              {/* Photo attached if any */}
+              {rep.photoUrl && (
+                <div className="p-2 rounded-xl bg-slate-900/80 border border-slate-700/80 flex items-center gap-3">
+                  <img
+                    src={rep.photoUrl}
+                    alt="Preuve photo"
+                    className="w-16 h-12 object-cover rounded-lg border border-slate-600"
+                  />
+                  <div className="text-xs">
+                    <span className="font-semibold text-emerald-300 flex items-center gap-1">
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>Photo de contrôle transmise à la Direction</span>
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-mono">Position GPS : {rep.coordonneesGPS}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Attendance and gear */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] pt-1">
+                <div>
+                  <span className="text-slate-400">Agents présents : </span>
+                  <span className="font-bold text-slate-200">{rep.agentsPresents.join(', ')}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400">Tenue : </span>
+                  <span className="font-bold text-slate-200">{rep.tenueReglementaire}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400">Main courante : </span>
+                  <span className="font-bold text-slate-200">
+                    {rep.registreMainCouranteTenu ? 'Émargée' : 'Non tenue'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400">Vigilance : </span>
+                  <span className="font-bold text-slate-200">{rep.vigilancePoste}</span>
+                </div>
+              </div>
+
+              {/* Observations */}
+              <div className="p-2.5 rounded-lg bg-slate-900/60 border border-slate-800 text-xs text-slate-300">
+                <p>
+                  <span className="font-semibold text-slate-400">Observations :</span> {rep.observations}
+                </p>
+                {rep.incidentSignale && (
+                  <p className="mt-1 text-rose-300 font-semibold">
+                    🚨 {rep.typeIncident} : {rep.descriptionIncident}
+                  </p>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};

@@ -1,0 +1,6 @@
+{
+  "name": "NigerSécurité - Gestion Gardiennage",
+  "description": "Plateforme de gestion opérationnelle et financière pour société de gardiennage et sécurité privée au Niger : Direction, Comptabilité, Contrôleur terrain.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,506 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isActive() {
+      return isAuthenticated() && getUserData().statut == 'actif';
+    }
+
+    // Le compte Direction a-t-il finalisé la configuration initiale obligatoire de son code PIN ?
+    // STRICT : Le compte n'est prêt QUE si le champ 'doitChangerPin' existe explicitement et vaut false.
+    // Si 'doitChangerPin' est absent ou s'il vaut true, la Direction est considérée non prête (accès protégé refusé).
+    function isPinConfigured() {
+      return ('doitChangerPin' in getUserData()) && getUserData().doitChangerPin == false;
+    }
+
+    function isDirection() {
+      return isActive() && getUserData().role == 'direction';
+    }
+
+    // Compte Direction pleinement opérationnel : authentifié, actif et code PIN obligatoirement configuré
+    function isDirectionReady() {
+      return isDirection() && isPinConfigured();
+    }
+
+    function isCompta() {
+      return isActive() && getUserData().role == 'comptabilite';
+    }
+
+    function isControleur() {
+      return isActive() && getUserData().role == 'controleur';
+    }
+
+    // Vérifie qu'un contrôleur actif dispose bien de ce siteId dans sa liste officielle sitesAssignesIds
+    function isSiteAssignedToControleur(siteId) {
+      return isControleur()
+        && ('sitesAssignesIds' in getUserData())
+        && getUserData().sitesAssignesIds is list
+        && siteId is string
+        && siteId.size() > 0
+        && siteId in getUserData().sitesAssignesIds;
+    }
+
+    // --- Isolation Multi-Entreprises (Phase A de transition, compatible comptes historiques NIGERSECURITE-001) ---
+    // Format identique à src/utils/enterpriseContext.ts (ex: NIGERSECURITE-001)
+    function isValidEntrepriseId(val) {
+      return val is string
+        && val.size() >= 3
+        && val.size() <= 64
+        && val.matches('^[A-Z0-9][A-Z0-9_\\-]+$');
+    }
+
+    // Entreprise effective de l'utilisateur authentifié :
+    // - Si entrepriseId est présent et valide sur /users/{uid}, on l'utilise strictement.
+    // - Sinon (compte historique créé avant la Phase A), rattachement transitoire à NIGERSECURITE-001.
+    function effectiveUserEntrepriseId() {
+      return ('entrepriseId' in getUserData() && isValidEntrepriseId(getUserData().entrepriseId))
+        ? getUserData().entrepriseId
+        : 'NIGERSECURITE-001';
+    }
+
+    // Entreprise effective d'un document Firestore (rétrocompatible avec les documents historiques sans champ entrepriseId).
+    function effectiveDocEntrepriseId(docData) {
+      return ('entrepriseId' in docData && isValidEntrepriseId(docData.entrepriseId))
+        ? docData.entrepriseId
+        : 'NIGERSECURITE-001';
+    }
+
+    function sameEntrepriseAsDoc(docData) {
+      return effectiveUserEntrepriseId() == effectiveDocEntrepriseId(docData);
+    }
+
+    // Phase A (transition) sur allow list :
+    // - NIGERSECURITE-001 conserve la compatibilité avec les requêtes existantes non filtrées et documents historiques.
+    // - Toute autre entreprise est immédiatement tenue de filtrer strictement sur where('entrepriseId', '==', ...).
+    // IMPORTANT : Phase A ne constitue PAS une isolation multi-entreprises complète sur list tant que NIGERSECURITE-001
+    // bénéficie de cette tolérance ; la Phase B (backfill + filtre strict partout) est obligatoire avant un 2e client.
+    function canListEntrepriseDoc(docData) {
+      return effectiveUserEntrepriseId() == 'NIGERSECURITE-001'
+        || docData.entrepriseId == effectiveUserEntrepriseId();
+    }
+
+    // Phase A sur créations terrain/paramétrage (patrol_scans, patrol_checkpoints, patrol_rounds_config) :
+    // - Si entrepriseId est fourni, il doit être valide et strictement égal à l'entreprise de l'utilisateur.
+    // - S'il est omis, toléré uniquement pour NIGERSECURITE-001 durant la transition Phase A.
+    function isValidIncomingEntrepriseField(data) {
+      return ('entrepriseId' in data)
+        ? (isValidEntrepriseId(data.entrepriseId) && data.entrepriseId == effectiveUserEntrepriseId())
+        : (effectiveUserEntrepriseId() == 'NIGERSECURITE-001');
+    }
+
+    function isValidStaffLoginIdForRole(role, loginId) {
+      return loginId is string
+        && loginId.size() >= 11
+        && loginId.size() <= 24
+        && (
+          (role == 'comptabilite' && loginId.matches('^CPT-[0-9]{4}-[0-9]{3,4}$'))
+          || (role == 'controleur' && loginId.matches('^CTR-[0-9]{4}-[0-9]{3,4}$'))
+        );
+    }
+
+    function isValidStaffUserCreate(userId, data) {
+      return isValidId(userId)
+        && userId != request.auth.uid
+        && data.keys().hasAll([
+            'uid', 'email', 'loginId', 'entrepriseId', 'nom', 'role', 'statut',
+            'doitChangerCodeSecret', 'creeLe', 'creeParUid'
+        ])
+        && data.keys().hasOnly([
+            'uid', 'email', 'loginId', 'entrepriseId', 'nom', 'prenom', 'role', 'statut',
+            'grade', 'telephone', 'sitesAssignesIds',
+            'doitChangerCodeSecret', 'creeLe', 'creeParUid'
+        ])
+        && data.uid is string
+        && data.uid == userId
+        && isValidEntrepriseId(data.entrepriseId)
+        && data.entrepriseId == effectiveUserEntrepriseId()
+        && data.role in ['comptabilite', 'controleur']
+        && isValidStaffLoginIdForRole(data.role, data.loginId)
+        && data.email is string
+        && data.email.size() >= 10
+        && data.email.size() <= 254
+        && data.email == data.loginId.lower() + '@acces.nigersecurite.ne'
+        && data.nom is string
+        && data.nom.size() >= 2
+        && data.nom.size() <= 120
+        && (!('prenom' in data) || (data.prenom is string && data.prenom.size() <= 100))
+        && (!('grade' in data) || (data.grade is string && data.grade.size() <= 100))
+        && (!('telephone' in data) || (data.telephone is string && data.telephone.size() <= 40))
+        && (!('sitesAssignesIds' in data) || (
+            data.sitesAssignesIds is list
+            && data.sitesAssignesIds.size() <= 100
+            && (data.sitesAssignesIds.size() == 0 || data.sitesAssignesIds[0] is string)
+        ))
+        && data.statut == 'actif'
+        && data.doitChangerCodeSecret is bool
+        && data.creeLe is string
+        && data.creeLe.size() > 0
+        && data.creeLe.size() <= 64
+        && data.creeParUid is string
+        && data.creeParUid == request.auth.uid;
+    }
+
+    function isValidLoginIdentifierCreate(loginId, data) {
+      return isValidId(loginId)
+        && data.keys().hasAll(['loginId', 'uid', 'entrepriseId', 'role', 'statut', 'creeLe', 'creeParUid'])
+        && data.keys().hasOnly(['loginId', 'uid', 'entrepriseId', 'role', 'statut', 'creeLe', 'creeParUid'])
+        && data.loginId is string
+        && data.loginId == loginId
+        && data.uid is string
+        && isValidId(data.uid)
+        && data.uid != request.auth.uid
+        && isValidEntrepriseId(data.entrepriseId)
+        && data.entrepriseId == effectiveUserEntrepriseId()
+        && data.role in ['comptabilite', 'controleur']
+        && isValidStaffLoginIdForRole(data.role, loginId)
+        && data.statut == 'actif'
+        && data.creeLe is string
+        && data.creeLe.size() > 0
+        && data.creeLe.size() <= 64
+        && data.creeParUid is string
+        && data.creeParUid == request.auth.uid;
+    }
+
+    // 1. Profils Utilisateurs (Annuaire sécurisé, champs d'identité et privilèges scellés)
+    match /users/{userId} {
+      // Lecture unitaire :
+      // - Chaque utilisateur authentifié peut toujours lire SON propre profil (aucun blocage à la connexion / PIN).
+      // - Une Direction opérationnelle peut lire un profil de SA propre entreprise (ou vérifier l'inexistence resource == null en transaction).
+      allow get: if isAuthenticated()
+                 && isValidId(userId)
+                 && (
+                   request.auth.uid == userId
+                   || (isDirectionReady() && (resource == null || sameEntrepriseAsDoc(resource.data)))
+                 );
+
+      // Liste de l'annuaire : strictement réservée à la Direction opérationnelle (Phase A sur canListEntrepriseDoc)
+      allow list: if isDirectionReady() && canListEntrepriseDoc(resource.data);
+
+      // Création de compte subordonné UNIQUEMENT par Direction opérationnelle (PIN configuré) :
+      // - Rôle strictement limité à 'comptabilite' (CPT-YYYY-XXX) ou 'controleur' (CTR-YYYY-XXX)
+      // - Jamais de création de compte 'direction' côté client
+      // - entrepriseId obligatoire, égal à l'entreprise de la Direction et cohérent avec /login_identifiers/{loginId}
+      // - Réservation atomique obligatoire de /login_identifiers/{loginId} dans la même transaction
+      // - Aucun champ secret (pinHash, pinSalt, codeSecret, doitChangerPin) autorisé
+      allow create: if isAuthenticated()
+                    && isValidStaffUserCreate(userId, request.resource.data)
+                    && isDirectionReady()
+                    && existsAfter(/databases/$(database)/documents/login_identifiers/$(request.resource.data.loginId))
+                    && getAfter(/databases/$(database)/documents/login_identifiers/$(request.resource.data.loginId)).data.uid == userId
+                    && getAfter(/databases/$(database)/documents/login_identifiers/$(request.resource.data.loginId)).data.role == request.resource.data.role
+                    && getAfter(/databases/$(database)/documents/login_identifiers/$(request.resource.data.loginId)).data.entrepriseId == request.resource.data.entrepriseId;
+
+      // Mise à jour en deux paliers strictement cloisonnés :
+      // Palier 1 : Direction opérationnelle sur un profil subordonné (comptabilite / controleur) DE SA PROPRE ENTREPRISE UNIQUEMENT
+      //            (jamais sur un autre profil Direction ni sur soi-même ; role/uid/email/loginId/entrepriseId/creeLe/creeParUid scellés)
+      // Palier 2 : Comptable ou Contrôleur ACTIF passant uniquement son propre drapeau doitChangerCodeSecret à false
+      //            après changement de son code secret personnel dans Firebase Auth.
+      allow update: if (
+                      isAuthenticated()
+                      && isValidId(userId)
+                      && isDirectionReady()
+                      && sameEntrepriseAsDoc(resource.data)
+                      && resource.data.role in ['controleur', 'comptabilite']
+                      && request.resource.data.role == resource.data.role
+                      && request.resource.data.uid == resource.data.uid
+                      && request.resource.data.email == resource.data.email
+                      && request.resource.data.creeLe == resource.data.creeLe
+                      && (!('loginId' in resource.data) || request.resource.data.loginId == resource.data.loginId)
+                      && (!('entrepriseId' in resource.data) || request.resource.data.entrepriseId == resource.data.entrepriseId)
+                      && (!('creeParUid' in resource.data) || request.resource.data.creeParUid == resource.data.creeParUid)
+                      && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+                          'doitChangerPin', 'pinHash', 'pinSalt',
+                          'doitChangerCodeSecret', 'loginId', 'entrepriseId', 'creeParUid'
+                      ])
+                      && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                          'statut', 'sitesAssignesIds', 'nom', 'prenom',
+                          'grade', 'telephone', 'derniereConnexion'
+                      ])
+                      && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['statut'])
+                          || request.resource.data.statut in ['actif', 'desactive'])
+                      && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['nom'])
+                          || (request.resource.data.nom is string && request.resource.data.nom.size() >= 2 && request.resource.data.nom.size() <= 120))
+                      && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['prenom'])
+                          || (request.resource.data.prenom is string && request.resource.data.prenom.size() <= 100))
+                      && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['grade'])
+                          || (request.resource.data.grade is string && request.resource.data.grade.size() <= 100))
+                      && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['telephone'])
+                          || (request.resource.data.telephone is string && request.resource.data.telephone.size() <= 40))
+                      && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['derniereConnexion'])
+                          || (request.resource.data.derniereConnexion is string && request.resource.data.derniereConnexion.size() <= 64))
+                      && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['sitesAssignesIds'])
+                          || (
+                              request.resource.data.sitesAssignesIds is list
+                              && request.resource.data.sitesAssignesIds.size() <= 100
+                              && (request.resource.data.sitesAssignesIds.size() == 0 || request.resource.data.sitesAssignesIds[0] is string)
+                          ))
+                    )
+                    || (
+                      isAuthenticated()
+                      && isValidId(userId)
+                      && request.auth.uid == userId
+                      && resource.data.statut == 'actif'
+                      && resource.data.role in ['controleur', 'comptabilite']
+                      && request.resource.data.role == resource.data.role
+                      && request.resource.data.uid == resource.data.uid
+                      && request.resource.data.email == resource.data.email
+                      && request.resource.data.statut == resource.data.statut
+                      && (!('entrepriseId' in resource.data) || request.resource.data.entrepriseId == resource.data.entrepriseId)
+                      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['doitChangerCodeSecret'])
+                      && request.resource.data.doitChangerCodeSecret == false
+                    );
+
+      allow delete: if false;
+    }
+
+    // 1bis. Registre Immuable d'Unicité des Identifiants de Connexion (CPT-YYYY-XXX / CTR-YYYY-XXX)
+    // Strictement inaccessible aux utilisateurs non authentifiés et aux comptes subordonnés.
+    match /login_identifiers/{loginId} {
+      // resource == null autorisé pour la pré-vérification d'unicité avant création par une Direction prête ;
+      // si le document existe déjà, lecture réservée à la Direction de la même entreprise.
+      allow get: if isAuthenticated()
+                 && isValidId(loginId)
+                 && isDirectionReady()
+                 && (resource == null || sameEntrepriseAsDoc(resource.data));
+      allow list: if isDirectionReady() && canListEntrepriseDoc(resource.data);
+
+      allow create: if isAuthenticated()
+                    && isValidLoginIdentifierCreate(loginId, request.resource.data)
+                    && isDirectionReady()
+                    && existsAfter(/databases/$(database)/documents/users/$(request.resource.data.uid))
+                    && getAfter(/databases/$(database)/documents/users/$(request.resource.data.uid)).data.loginId == loginId
+                    && getAfter(/databases/$(database)/documents/users/$(request.resource.data.uid)).data.role == request.resource.data.role
+                    && getAfter(/databases/$(database)/documents/users/$(request.resource.data.uid)).data.entrepriseId == request.resource.data.entrepriseId;
+
+      allow update: if isAuthenticated()
+                    && isValidId(loginId)
+                    && isDirectionReady()
+                    && sameEntrepriseAsDoc(resource.data)
+                    && request.resource.data.loginId == resource.data.loginId
+                    && request.resource.data.uid == resource.data.uid
+                    && request.resource.data.role == resource.data.role
+                    && request.resource.data.creeLe == resource.data.creeLe
+                    && request.resource.data.creeParUid == resource.data.creeParUid
+                    && (!('entrepriseId' in resource.data) || request.resource.data.entrepriseId == resource.data.entrepriseId)
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['statut'])
+                    && request.resource.data.statut in ['actif', 'desactive'];
+
+      // Jamais de suppression : un identifiant attribué ne peut jamais être réutilisé pour un autre compte
+      allow delete: if false;
+    }
+
+    // 2. Journal Immuable des Pointages de Ronde
+    match /patrol_scans/{scanId} {
+      // Lecture unitaire : même entreprise + Direction opérationnelle, Comptabilité ou contrôleur propriétaire affecté à ce site
+      allow get: if isValidId(scanId)
+                 && isActive()
+                 && (resource == null || sameEntrepriseAsDoc(resource.data))
+                 && (
+                   isDirectionReady()
+                   || isCompta()
+                   || (
+                     resource != null
+                     && isSiteAssignedToControleur(resource.data.siteId)
+                     && resource.data.controleurId == request.auth.uid
+                   )
+                 );
+      allow list: if (isDirectionReady() || isCompta()) && canListEntrepriseDoc(resource.data);
+
+      // Création : STRICTEMENT réservée au rôle 'controleur' ACTIF, pour son propre UID et UNIQUEMENT sur un site qui lui est assigné
+      allow create: if isSiteAssignedToControleur(request.resource.data.siteId)
+                    && isValidId(scanId)
+                    && isValidIncomingEntrepriseField(request.resource.data)
+                    && request.resource.data.keys().hasAll([
+                        'id', 'siteId', 'pointId', 'controleurId',
+                        'scanneLe', 'statutConformite', 'statutSynchro', 'creeLe'
+                    ])
+                    && request.resource.data.keys().hasOnly([
+                        'id', 'entrepriseId', 'siteId', 'siteNom', 'pointId', 'pointNom',
+                        'controleurId', 'controleurNom', 'controleurGrade',
+                        'scanneLe', 'horaireScan', 'dateScan', 'statutConformite',
+                        'observations', 'statutSynchro', 'creeLe', 'synchroniseLe'
+                    ])
+                    && request.resource.data.id == scanId
+                    && request.resource.data.controleurId == request.auth.uid
+                    && request.resource.data.siteId is string
+                    && request.resource.data.pointId is string
+                    && request.resource.data.scanneLe is string
+                    && request.resource.data.statutConformite in [
+                        'Conforme', 'En retard', 'Hors plage horaire', 'Point répété'
+                    ]
+                    && request.resource.data.statutSynchro in ['synchronise', 'en_attente'];
+
+      // Mise à jour : champs techniques uniquement, réservée au contrôleur propriétaire ACTIF de la même entreprise toujours affecté à ce site
+      allow update: if isSiteAssignedToControleur(resource.data.siteId)
+                    && isValidId(scanId)
+                    && sameEntrepriseAsDoc(resource.data)
+                    && resource.data.controleurId == request.auth.uid
+                    && request.resource.data.siteId == resource.data.siteId
+                    && request.resource.data.controleurId == resource.data.controleurId
+                    && (!('entrepriseId' in resource.data) || request.resource.data.entrepriseId == resource.data.entrepriseId)
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                        'statutSynchro', 'synchroniseLe'
+                    ])
+                    && request.resource.data.statutSynchro in ['synchronise', 'en_attente'];
+
+      allow delete: if false;
+    }
+
+    // 3. Points de Contrôle QR de Ronde
+    match /patrol_checkpoints/{checkpointId} {
+      // Lecture : même entreprise + Direction opérationnelle, Comptabilité ou contrôleur affecté au site du point
+      allow get: if isValidId(checkpointId)
+                 && (resource == null || sameEntrepriseAsDoc(resource.data))
+                 && (
+                   isDirectionReady()
+                   || isCompta()
+                   || (resource != null && isSiteAssignedToControleur(resource.data.siteId))
+                 );
+      allow list: if (isDirectionReady() || isCompta() || isSiteAssignedToControleur(resource.data.siteId))
+                  && canListEntrepriseDoc(resource.data);
+
+      // Création et mise à jour : Direction opérationnelle (PIN configuré) uniquement
+      allow create: if isDirectionReady()
+                    && isValidId(checkpointId)
+                    && isValidIncomingEntrepriseField(request.resource.data)
+                    && request.resource.data.keys().hasAll(['id', 'siteId', 'nom', 'qrPayload', 'estActif', 'creeLe'])
+                    && request.resource.data.keys().hasOnly([
+                        'id', 'entrepriseId', 'siteId', 'siteNom', 'nom', 'emplacement',
+                        'consignes', 'ordre', 'qrPayload', 'estActif', 'creeLe'
+                    ])
+                    && request.resource.data.id == checkpointId
+                    && request.resource.data.siteId is string
+                    && request.resource.data.nom is string
+                    && request.resource.data.estActif is bool;
+
+      allow update: if isDirectionReady()
+                    && isValidId(checkpointId)
+                    && sameEntrepriseAsDoc(resource.data)
+                    && request.resource.data.id == resource.data.id
+                    && request.resource.data.siteId == resource.data.siteId
+                    && request.resource.data.creeLe == resource.data.creeLe
+                    && (!('entrepriseId' in resource.data) || request.resource.data.entrepriseId == resource.data.entrepriseId)
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                        'nom', 'siteNom', 'emplacement', 'consignes', 'ordre', 'qrPayload', 'estActif'
+                    ])
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['nom']) 
+                        || (request.resource.data.nom is string && request.resource.data.nom.size() >= 2))
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['siteNom']) 
+                        || request.resource.data.siteNom is string)
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['emplacement']) 
+                        || request.resource.data.emplacement is string)
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['consignes']) 
+                        || request.resource.data.consignes is string)
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['ordre']) 
+                        || (request.resource.data.ordre is int || request.resource.data.ordre is float))
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['qrPayload']) 
+                        || request.resource.data.qrPayload is string)
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['estActif']) 
+                        || request.resource.data.estActif is bool);
+
+      allow delete: if false;
+    }
+
+    // 4. Configuration et Horaires des Rondes
+    match /patrol_rounds_config/{configId} {
+      // Lecture : même entreprise + Direction opérationnelle, Comptabilité ou contrôleur affecté au site configuré
+      allow get: if isValidId(configId)
+                 && (resource == null || sameEntrepriseAsDoc(resource.data))
+                 && (
+                   isDirectionReady()
+                   || isCompta()
+                   || (resource != null && isSiteAssignedToControleur(resource.data.siteId))
+                 );
+      allow list: if (isDirectionReady() || isCompta() || isSiteAssignedToControleur(resource.data.siteId))
+                  && canListEntrepriseDoc(resource.data);
+
+      // Création et mise à jour : Direction opérationnelle (PIN configuré) uniquement
+      allow create: if isDirectionReady()
+                    && isValidId(configId)
+                    && isValidIncomingEntrepriseField(request.resource.data)
+                    && request.resource.data.keys().hasAll(['id', 'siteId', 'nomRonde', 'pointsObligatoiresIds', 'actif'])
+                    && request.resource.data.keys().hasOnly([
+                        'id', 'entrepriseId', 'siteId', 'nomRonde', 'heureDebut', 'heureFin',
+                        'pointsObligatoiresIds', 'ordreStrict', 'actif'
+                    ])
+                    && request.resource.data.id == configId
+                    && request.resource.data.siteId is string
+                    && request.resource.data.nomRonde is string
+                    && request.resource.data.pointsObligatoiresIds is list
+                    && request.resource.data.actif is bool;
+
+      allow update: if isDirectionReady()
+                    && isValidId(configId)
+                    && sameEntrepriseAsDoc(resource.data)
+                    && request.resource.data.id == resource.data.id
+                    && request.resource.data.siteId == resource.data.siteId
+                    && (!('entrepriseId' in resource.data) || request.resource.data.entrepriseId == resource.data.entrepriseId)
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                        'nomRonde', 'heureDebut', 'heureFin', 'pointsObligatoiresIds', 'ordreStrict', 'actif'
+                    ])
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['nomRonde']) 
+                        || (request.resource.data.nomRonde is string && request.resource.data.nomRonde.size() >= 2))
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['heureDebut']) 
+                        || request.resource.data.heureDebut is string)
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['heureFin']) 
+                        || request.resource.data.heureFin is string)
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['pointsObligatoiresIds']) 
+                        || request.resource.data.pointsObligatoiresIds is list)
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['ordreStrict']) 
+                        || request.resource.data.ordreStrict is bool)
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['actif']) 
+                        || request.resource.data.actif is bool);
+
+      allow delete: if false;
+    }
+
+    // 5. Secrets d'Authentification et Verrous Serveur (Strictement inaccessibles au SDK Client)
+    // Seul le backend de confiance (Firebase Admin SDK) manipule ces collections.
+    match /server_auth_secrets/{secretId} {
+      allow read, write: if false;
+    }
+
+    match /server_auth_lockouts/{lockoutId} {
+      allow read, write: if false;
+    }
+
+    match /server_action_tickets/{ticketId} {
+      allow read, write: if false;
+    }
+
+    match /server_system_state/{stateId} {
+      allow read, write: if false;
+    }
+
+    match /preparations_paie/{prepId} {
+      allow read, write: if false;
+    }
+
+    // 6. Validations et Clôtures de Paie (Lecture autorisée Direction/Comptabilité de la même entreprise, Écriture STRICTEMENT SERVEUR)
+    match /validations_paie/{validationId} {
+      allow get: if isValidId(validationId)
+                 && (isDirectionReady() || isCompta())
+                 && (resource == null || sameEntrepriseAsDoc(resource.data));
+      allow list: if (isDirectionReady() || isCompta()) && canListEntrepriseDoc(resource.data);
+      allow write: if false;
+    }
+
+    // 7. Verrouillage absolu par défaut de toute autre collection
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

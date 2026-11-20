@@ -1,0 +1,173 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "Profil Utilisateur NigerSécurité",
+      "description": "Profil officiel d'habilitation (Direction, Comptabilité ou Contrôleur) associé à l'UID Firebase Auth, sans aucun secret PIN ni code secret",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "format": "email", "maxLength": 254 },
+        "loginId": {
+          "type": "string",
+          "maxLength": 24,
+          "pattern": "^(CPT|CTR)-[0-9]{4}-[0-9]{3,4}$",
+          "description": "Identifiant unique de connexion attribué par la Direction aux comptes Comptabilité (CPT) et Contrôleur (CTR)"
+        },
+        "entrepriseId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[A-Z0-9][A-Z0-9_-]{2,63}$",
+          "description": "Identifiant interne de l'entreprise d'appartenance (ex: NIGERSECURITE-001)"
+        },
+        "nom": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "prenom": { "type": "string", "maxLength": 100 },
+        "role": { "type": "string", "enum": ["direction", "comptabilite", "controleur"] },
+        "statut": { "type": "string", "enum": ["actif", "desactive"] },
+        "grade": { "type": "string", "maxLength": 100 },
+        "telephone": { "type": "string", "maxLength": 40 },
+        "sitesAssignesIds": { "type": "array" },
+        "doitChangerPin": { "type": "boolean" },
+        "doitChangerCodeSecret": { "type": "boolean" },
+        "creeParUid": { "type": "string", "maxLength": 128 },
+        "derniereConnexion": { "type": "string", "maxLength": 64 },
+        "creeLe": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["uid", "email", "nom", "role", "statut", "creeLe"]
+    },
+    "LoginIdentifier": {
+      "title": "Registre d'Unicité des Identifiants de Connexion",
+      "description": "Verrou atomique garantissant l'unicité permanente des identifiants CPT-YYYY-XXX et CTR-YYYY-XXX sans aucun secret",
+      "type": "object",
+      "properties": {
+        "loginId": {
+          "type": "string",
+          "maxLength": 24,
+          "pattern": "^(CPT|CTR)-[0-9]{4}-[0-9]{3,4}$"
+        },
+        "uid": { "type": "string", "maxLength": 128 },
+        "entrepriseId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[A-Z0-9][A-Z0-9_-]{2,63}$"
+        },
+        "role": { "type": "string", "enum": ["comptabilite", "controleur"] },
+        "statut": { "type": "string", "enum": ["actif", "desactive"] },
+        "creeLe": { "type": "string", "maxLength": 64 },
+        "creeParUid": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["loginId", "uid", "role", "statut", "creeLe", "creeParUid"]
+    },
+    "PatrolCheckpoint": {
+      "title": "Point de Contrôle de Ronde",
+      "description": "Repère physique équipé d'un QR-Code fixe à scanner lors des rondes sur site",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "entrepriseId": { "type": "string", "maxLength": 64, "pattern": "^[A-Z0-9][A-Z0-9_-]{2,63}$" },
+        "siteId": { "type": "string" },
+        "siteNom": { "type": "string" },
+        "nom": { "type": "string" },
+        "emplacement": { "type": "string" },
+        "consignes": { "type": "string" },
+        "ordre": { "type": "number" },
+        "qrPayload": { "type": "string" },
+        "estActif": { "type": "boolean" },
+        "creeLe": { "type": "string" }
+      },
+      "required": ["id", "siteId", "nom", "qrPayload", "estActif", "creeLe"]
+    },
+    "PatrolScan": {
+      "title": "Scan de Point de Ronde",
+      "description": "Enregistrement certifié et horodaté du passage d'un contrôleur sur un point de contrôle",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "entrepriseId": { "type": "string", "maxLength": 64, "pattern": "^[A-Z0-9][A-Z0-9_-]{2,63}$" },
+        "siteId": { "type": "string" },
+        "siteNom": { "type": "string" },
+        "pointId": { "type": "string" },
+        "pointNom": { "type": "string" },
+        "controleurId": { "type": "string" },
+        "controleurNom": { "type": "string" },
+        "controleurGrade": { "type": "string" },
+        "scanneLe": { "type": "string" },
+        "horaireScan": { "type": "string" },
+        "dateScan": { "type": "string" },
+        "statutConformite": {
+          "type": "string",
+          "enum": ["Conforme", "En retard", "Hors plage horaire", "Point répété"]
+        },
+        "observations": { "type": "string" },
+        "statutSynchro": {
+          "type": "string",
+          "enum": ["synchronise", "en_attente"]
+        },
+        "creeLe": { "type": "string" },
+        "synchroniseLe": { "type": "string" }
+      },
+      "required": ["id", "siteId", "pointId", "controleurId", "scanneLe", "statutConformite", "statutSynchro", "creeLe"]
+    },
+    "PatrolRoundConfig": {
+      "title": "Configuration de Ronde Programmée",
+      "description": "Programme et grille horaire des rondes attendues sur un site de gardiennage",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "entrepriseId": { "type": "string", "maxLength": 64, "pattern": "^[A-Z0-9][A-Z0-9_-]{2,63}$" },
+        "siteId": { "type": "string" },
+        "nomRonde": { "type": "string" },
+        "heureDebut": { "type": "string" },
+        "heureFin": { "type": "string" },
+        "pointsObligatoiresIds": { "type": "array" },
+        "ordreStrict": { "type": "boolean" },
+        "actif": { "type": "boolean" }
+      },
+      "required": ["id", "siteId", "nomRonde", "pointsObligatoiresIds", "actif"]
+    },
+    "PayrollValidation": {
+      "title": "Validation Officielle de Paie",
+      "description": "Clôture de paie scellée exclusivement côté serveur après vérification du code PIN Direction",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "entrepriseId": { "type": "string", "maxLength": 64, "pattern": "^[A-Z0-9][A-Z0-9_-]{2,63}$" },
+        "payrollId": { "type": "string" },
+        "mois": { "type": "string" },
+        "montantTotal": { "type": "number" },
+        "beneficiaire": { "type": "string" },
+        "validePar": { "type": "string" },
+        "ticketId": { "type": "string" },
+        "statut": { "type": "string", "enum": ["VALIDEE"] },
+        "dateValidation": { "type": "string" },
+        "misAJourLe": { "type": "string" }
+      },
+      "required": ["id", "payrollId", "montantTotal", "beneficiaire", "validePar", "statut"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Profils utilisateurs (Direction, Comptabilité, Contrôleur) sans données secrètes"
+    },
+    "/login_identifiers/{loginId}": {
+      "schema": "LoginIdentifier",
+      "description": "Registre immuable d'unicité des identifiants de connexion CPT-YYYY-XXX et CTR-YYYY-XXX"
+    },
+    "/patrol_checkpoints/{checkpointId}": {
+      "schema": "PatrolCheckpoint",
+      "description": "Points de contrôle fixes avec QR-Codes pour les sites de gardiennage"
+    },
+    "/patrol_scans/{scanId}": {
+      "schema": "PatrolScan",
+      "description": "Historique certifié des scans de points de ronde transmis par les contrôleurs"
+    },
+    "/patrol_rounds_config/{configId}": {
+      "schema": "PatrolRoundConfig",
+      "description": "Programmes et plages horaires des rondes par site définis par la Direction"
+    },
+    "/validations_paie/{validationId}": {
+      "schema": "PayrollValidation",
+      "description": "Validations et clôtures de paie écrites exclusivement par le serveur Admin SDK"
+    }
+  }
+}

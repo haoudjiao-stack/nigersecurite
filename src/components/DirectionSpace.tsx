@@ -1,0 +1,489 @@
+import React from 'react';
+import {
+  TrendingUp,
+  Shield,
+  Building,
+  Users,
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  DollarSign,
+  ArrowUpRight,
+  FileText,
+  MapPin,
+  ChevronRight,
+  PhoneCall,
+  Settings,
+  Send,
+  Building2,
+  Check,
+  QrCode,
+} from 'lucide-react';
+import {
+  Client,
+  Contract,
+  SiteGardiennage,
+  AgentSecurite,
+  FactureMensuelle,
+  FichePaieAgent,
+  RapportControle,
+  MainNavModule,
+  StatutValidationPaie,
+  ScanPointControle,
+} from '../types';
+
+interface DirectionSpaceProps {
+  clients: Client[];
+  contracts: Contract[];
+  sites: SiteGardiennage[];
+  agents: AgentSecurite[];
+  invoices: FactureMensuelle[];
+  payslips?: FichePaieAgent[];
+  reports: RapportControle[];
+  statutPaie: StatutValidationPaie;
+  onValidatePaieByDirection: () => void;
+  onNavigateModule: (mod: MainNavModule) => void;
+  onViewInvoice: (inv: FactureMensuelle) => void;
+  onViewAgentBadge: (ag: AgentSecurite) => void;
+  patrolScans?: ScanPointControle[];
+}
+
+export const DirectionSpace: React.FC<DirectionSpaceProps> = ({
+  clients,
+  contracts,
+  sites,
+  agents,
+  invoices,
+  payslips = [],
+  reports,
+  statutPaie,
+  onValidatePaieByDirection,
+  onNavigateModule,
+  onViewInvoice,
+  onViewAgentBadge,
+  patrolScans = [],
+}) => {
+  const formatFCFA = (val: number) => new Intl.NumberFormat('fr-FR').format(val) + ' FCFA';
+
+  const totalCA = contracts.reduce((acc, c) => acc + c.montantMensuelHT, 0);
+  const totalGuardsRequired = sites.reduce((acc, s) => acc + s.postesRequis, 0);
+  const activeGuardsCount = agents.filter((a) => a.statut === 'En poste').length;
+  const compliantSitesCount = sites.filter((s) => s.statutConformite === 'Conforme').length;
+  const alertReports = reports.filter((r) => r.incidentSignale || r.statut.includes('Alerte'));
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  const todayScans = patrolScans.filter((s) => s.dateScan === todayStr || s.scanneLe.startsWith(todayStr));
+
+  return (
+    <div className="space-y-6 animate-in fade-in">
+      {/* Simulation & Role Notice */}
+      <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 text-xs flex items-start gap-2.5">
+        <Shield className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+        <div>
+          <p className="font-bold text-emerald-300">
+            Espace Direction Générale (Accès Décisionnel & Exécutif) :
+          </p>
+          <p className="mt-0.5 text-emerald-200/90 leading-relaxed">
+            Vous disposez d'une visibilité complète : gouvernance des clients et contrats, déploiement des agents sur sites, approbation hiérarchique de l'état de paie mensuel, consultation financière et paramétrage officiel de l'entreprise.
+          </p>
+        </div>
+      </div>
+
+      {/* Top Welcome & Executive Summary Banner */}
+      <div className="p-5 sm:p-6 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 border border-slate-800 shadow-xl relative overflow-hidden">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 relative z-10">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                Direction Générale
+              </span>
+              <span className="text-xs text-slate-400">Niamey • Opérations de Sécurité</span>
+            </div>
+            <h1 className="text-xl sm:text-2xl font-black text-white mt-1.5">
+              Supervision Opérationnelle & Stratégique
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-300 mt-1 max-w-2xl">
+              Tableau de bord de gouvernance : état des sites protégés, couverture des postes vigiles 24/7, rentabilité des contrats et alertes en direct transmises par les contrôleurs.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => onNavigateModule('suivi_rondes')}
+              className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-lg shadow-emerald-900/40 cursor-pointer"
+            >
+              <QrCode className="w-4 h-4" />
+              <span>Suivi Rondes ({todayScans.length} scans)</span>
+            </button>
+            <button
+              onClick={() => onNavigateModule('parametres')}
+              className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+            >
+              <Settings className="w-4 h-4 text-emerald-400" />
+              <span>Paramètres</span>
+            </button>
+            <button
+              onClick={() => onNavigateModule('contrats')}
+              className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+            >
+              <FileText className="w-4 h-4 text-blue-400" />
+              <span>Contrats</span>
+            </button>
+            <button
+              onClick={() => onNavigateModule('rapports')}
+              className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+            >
+              <Shield className="w-4 h-4 text-emerald-400" />
+              <span>Rapports</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Paie Validation Alert Box for Direction */}
+      {payslips.filter((p) => p.statut === 'En attente de validation').length > 0 && (
+        <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-950/80 via-slate-900 to-amber-950/80 border-2 border-amber-500/60 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-pulse">
+          <div className="flex items-start gap-3">
+            <div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/40 shrink-0">
+              <Clock className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-amber-400">Action Requise Direction</span>
+                <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded font-mono font-bold">
+                  {payslips.filter((p) => p.statut === 'En attente de validation').length} fiche(s) en attente
+                </span>
+              </div>
+              <h3 className="text-base font-black text-white mt-0.5">
+                Validation Hiérarchique de l'État de Paie
+              </h3>
+              <p className="text-xs text-slate-300 mt-0.5">
+                Le service Comptabilité vous a transmis les calculs de salaires. Vous pouvez valider ou rejeter individuellement avec un motif.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <button
+              onClick={() => onNavigateModule('paie')}
+              className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
+            >
+              <Shield className="w-4 h-4" />
+              <span>Examiner les fiches</span>
+            </button>
+            <button
+              onClick={onValidatePaieByDirection}
+              className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-900/40 transition cursor-pointer shrink-0"
+              title="Valider en bloc toutes les fiches en attente"
+            >
+              <Check className="w-4 h-4" />
+              <span>Valider tout</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {statutPaie === 'Validé par la Direction' && (
+        <div className="p-3.5 rounded-xl bg-emerald-950/40 border border-emerald-500/40 flex items-center justify-between text-xs text-emerald-200">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>État de paie d'Octobre 2026 <strong>validé et approuvé par la Direction</strong>. Transmis à la Comptabilité pour paiement.</span>
+          </div>
+          <button
+            onClick={() => onNavigateModule('paie')}
+            className="text-emerald-300 hover:text-white font-bold underline cursor-pointer"
+          >
+            Consulter les salaires
+          </button>
+        </div>
+      )}
+
+      {/* KPI Cards Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* KPI 1 */}
+        <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 hover:border-slate-700 transition">
+          <div className="flex items-center justify-between text-slate-400 text-xs font-semibold">
+            <span>CA Mensuel Contrats</span>
+            <span className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400">
+              <TrendingUp className="w-4 h-4" />
+            </span>
+          </div>
+          <div className="mt-2">
+            <p className="text-xl sm:text-2xl font-black text-white">{formatFCFA(totalCA)}</p>
+            <p className="text-[11px] text-emerald-400 mt-1 flex items-center gap-1 font-medium">
+              <span>{contracts.length} contrats actifs en portefeuille</span>
+            </p>
+          </div>
+        </div>
+
+        {/* KPI 2 */}
+        <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 hover:border-slate-700 transition">
+          <div className="flex items-center justify-between text-slate-400 text-xs font-semibold">
+            <span>Effectif Déployé</span>
+            <span className="p-2 rounded-xl bg-blue-500/10 text-blue-400">
+              <Users className="w-4 h-4" />
+            </span>
+          </div>
+          <div className="mt-2">
+            <p className="text-xl sm:text-2xl font-black text-white">
+              {activeGuardsCount} <span className="text-sm font-normal text-slate-400">/ {agents.length} vigiles</span>
+            </p>
+            <p className="text-[11px] text-slate-400 mt-1 font-medium">
+              Postes requis : <span className="text-slate-200 font-bold">{totalGuardsRequired}</span> sur Niamey
+            </p>
+          </div>
+        </div>
+
+        {/* KPI 3 */}
+        <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 hover:border-slate-700 transition">
+          <div className="flex items-center justify-between text-slate-400 text-xs font-semibold">
+            <span>Sites de Gardiennage</span>
+            <span className="p-2 rounded-xl bg-purple-500/10 text-purple-400">
+              <Building className="w-4 h-4" />
+            </span>
+          </div>
+          <div className="mt-2">
+            <p className="text-xl sm:text-2xl font-black text-white">{sites.length} sites</p>
+            <p className="text-[11px] text-emerald-400 mt-1 font-medium">
+              {compliantSitesCount} conformes aux rondes du jour
+            </p>
+          </div>
+        </div>
+
+        {/* KPI 4 */}
+        <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 hover:border-slate-700 transition">
+          <div className="flex items-center justify-between text-slate-400 text-xs font-semibold">
+            <span>Alertes / Incidents</span>
+            <span className={`p-2 rounded-xl ${alertReports.length > 0 ? 'bg-rose-500/15 text-rose-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
+              <AlertTriangle className="w-4 h-4" />
+            </span>
+          </div>
+          <div className="mt-2">
+            <p className="text-xl sm:text-2xl font-black text-white">{alertReports.length}</p>
+            <p className="text-[11px] text-rose-300 mt-1 font-medium">
+              {alertReports.length > 0 ? '1 anomalie nocturne prise en charge' : 'Aucune alerte critique en cours'}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Grid: Live Site Monitoring & Recent Field Incidents */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Sites Overview (2 cols) */}
+        <div className="lg:col-span-2 space-y-4">
+          <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="font-bold text-white text-base">État des Sites Surveillés à Niamey</h3>
+                <p className="text-xs text-slate-400">Conformité des postes et dernières inspections</p>
+              </div>
+              <button
+                onClick={() => onNavigateModule('sites')}
+                className="text-xs font-medium text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
+              >
+                <span>Tous les sites ({sites.length})</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {sites.slice(0, 4).map((site) => (
+                <div
+                  key={site.id}
+                  className="p-3.5 rounded-xl bg-slate-800/50 border border-slate-800 hover:border-slate-700 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-bold text-white text-sm">{site.nom}</h4>
+                      <span className="text-[10px] px-2 py-0.5 rounded font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700">
+                        {site.quartier}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400">
+                      Client : <span className="text-slate-200">{site.clientNom}</span> • Resp : {site.responsableSite}
+                    </p>
+                    <p className="text-[11px] text-slate-400">
+                      Dernier passage contrôleur : <span className="text-slate-300 font-semibold">{site.derniereVisiteControle}</span>
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-3 self-start sm:self-center">
+                    <div className="text-right text-xs">
+                      <p className="text-slate-400">Effectif</p>
+                      <p className="font-bold text-white">
+                        {site.effectifActuel} / {site.postesRequis} vigiles
+                      </p>
+                    </div>
+
+                    <span
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${
+                        site.statutConformite === 'Conforme'
+                          ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                          : site.statutConformite === 'Anomalie signalée'
+                          ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                          : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                      }`}
+                    >
+                      {site.statutConformite}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Active Contracts Summary */}
+          <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="font-bold text-white text-base">Portefeuille des Contrats de Gardiennage</h3>
+                <p className="text-xs text-slate-400">Types de garde, effectifs et montants mensuels</p>
+              </div>
+              <button
+                onClick={() => onNavigateModule('contrats')}
+                className="text-xs font-medium text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
+              >
+                <span>Gérer les contrats</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-400 font-semibold pb-2">
+                    <th className="py-2 px-2">N° Contrat</th>
+                    <th className="py-2 px-2">Client</th>
+                    <th className="py-2 px-2">Formule Garde</th>
+                    <th className="py-2 px-2 text-center">Effectif</th>
+                    <th className="py-2 px-2 text-right">Tarif Mensuel HT</th>
+                    <th className="py-2 px-2 text-center">Statut</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 text-slate-300">
+                  {contracts.map((c) => (
+                    <tr key={c.id} className="hover:bg-slate-800/30">
+                      <td className="py-2.5 px-2 font-mono font-bold text-emerald-400">{c.numeroContrat}</td>
+                      <td className="py-2.5 px-2 font-semibold text-white">{c.clientNom}</td>
+                      <td className="py-2.5 px-2 text-slate-300">{c.typePrestation || c.typeGarde}</td>
+                      <td className="py-2.5 px-2 text-center font-bold text-white">{c.nombreAgents || c.effectifVigiles || 4}</td>
+                      <td className="py-2.5 px-2 text-right font-medium text-white">{formatFCFA(c.montantFCFA || c.montantMensuelHT)}</td>
+                      <td className="py-2.5 px-2 text-center">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            c.statut === 'Actif' || c.statut === 'En cours'
+                              ? 'bg-emerald-500/20 text-emerald-300'
+                              : c.statut === 'En attente de signature' || c.statut === 'À renouveler'
+                              ? 'bg-amber-500/20 text-amber-300'
+                              : 'bg-rose-500/20 text-rose-300'
+                          }`}
+                        >
+                          {c.statut}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Column: Alertes Terrain & Agents de garde */}
+        <div className="space-y-4">
+          {/* Live Field Incident Box */}
+          <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-white text-base flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-400" />
+                <span>Rapports de Rondes Récents</span>
+              </h3>
+              <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-mono">
+                Dernières 24h
+              </span>
+            </div>
+
+            <div className="space-y-3">
+              {reports.slice(0, 3).map((rep) => (
+                <div
+                  key={rep.id}
+                  className={`p-3 rounded-xl border text-xs space-y-1.5 ${
+                    rep.incidentSignale
+                      ? 'bg-rose-950/20 border-rose-500/30 text-rose-200'
+                      : 'bg-slate-800/40 border-slate-800 text-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-white">{rep.siteNom}</span>
+                    <span className="text-[10px] text-slate-400 font-mono">{rep.dateHeure.split(' ')[1]}</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Contrôleur : <span className="text-slate-300">{rep.controleurNom}</span>
+                  </p>
+                  {rep.incidentSignale ? (
+                    <div className="p-2 rounded bg-rose-900/30 border border-rose-500/30 text-rose-300 text-[11px]">
+                      <p className="font-bold">⚠️ {rep.typeIncident}</p>
+                      <p className="mt-0.5 text-rose-200">{rep.descriptionIncident}</p>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-slate-400 italic">"{rep.observations}"</p>
+                  )}
+                  <div className="flex items-center justify-between pt-1 text-[10px] text-slate-500">
+                    <span>GPS : {rep.coordonneesGPS.split(' ')[0]} {rep.coordonneesGPS.split(' ')[1]}</span>
+                    <span className="text-emerald-400 font-semibold">{rep.statut}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <button
+              onClick={() => onNavigateModule('rapports')}
+              className="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition cursor-pointer text-center"
+            >
+              Consulter le journal complet des rondes
+            </button>
+          </div>
+
+          {/* Quick Security Agents preview */}
+          <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-white text-base">Vigiles en Poste Actuellement</h3>
+              <button
+                onClick={() => onNavigateModule('agents')}
+                className="text-xs text-emerald-400 hover:text-emerald-300 cursor-pointer"
+              >
+                Effectif total ({agents.length})
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              {agents.slice(0, 4).map((ag) => (
+                <div
+                  key={ag.id}
+                  className="p-2.5 rounded-xl bg-slate-800/40 border border-slate-800 flex items-center justify-between text-xs"
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center font-bold text-white text-xs">
+                      {ag.prenom[0]}{ag.nom[0]}
+                    </div>
+                    <div>
+                      <p className="font-bold text-white">{ag.prenom} {ag.nom}</p>
+                      <p className="text-[10px] text-slate-400">{ag.siteActuel}</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => onViewAgentBadge(ag)}
+                    className="p-1.5 rounded-lg bg-slate-700/60 hover:bg-slate-700 text-emerald-400 text-[11px] font-medium transition cursor-pointer"
+                    title="Voir badge professionnel"
+                  >
+                    Badge
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};

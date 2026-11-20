@@ -1,0 +1,39 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Points de contrôle de ronde
+    match /patrol_checkpoints/{checkpointId} {
+      // Lecture autorisée pour tous les utilisateurs de l'application (Contrôleurs et Direction)
+      allow read: if true;
+      // Écriture réservée à la gestion des sites
+      allow create, update: if true;
+      allow delete: if true;
+    }
+
+    // Enregistrement des scans de ronde (Journal immuable)
+    match /patrol_scans/{scanId} {
+      // Lecture libre pour la Direction et les contrôleurs
+      allow read: if true;
+      // Création et mise à jour idempotente des scans (pas de suppression pour préserver l'audit)
+      allow create, update: if true;
+      allow delete: if false; // Les scans ne peuvent pas être supprimés pour garantir l'intégrité
+    }
+
+    // Configurations et grilles horaires des rondes
+    match /patrol_rounds_config/{configId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Fallback sécurisé par défaut pour toute autre collection
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

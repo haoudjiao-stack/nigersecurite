@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="100" fill="#0f172a"/>
+  <path d="M256 60 L390 120 V250 C390 350 256 440 256 440 C256 440 122 350 122 250 V120 Z" fill="#065f46" stroke="#10b981" stroke-width="16"/>
+  <circle cx="256" cy="230" r="50" fill="#f59e0b"/>
+  <path d="M256 200 L266 222 L290 224 L272 238 L277 262 L256 248 L235 262 L240 238 L222 224 L246 222 Z" fill="#ffffff"/>
+  <text x="256" y="340" font-family="system-ui, -apple-system, sans-serif" font-weight="900" font-size="34" fill="#ffffff" text-anchor="middle" letter-spacing="3">NIGER</text>
+  <text x="256" y="375" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="22" fill="#10b981" text-anchor="middle" letter-spacing="5">SÉCURITÉ</text>
+</svg>

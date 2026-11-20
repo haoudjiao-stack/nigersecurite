@@ -1,0 +1,188 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isActive() {
+      return isAuthenticated() && getUserData().statut == 'actif';
+    }
+
+    function isDirection() {
+      return isActive() && getUserData().role == 'direction';
+    }
+
+    function isCompta() {
+      return isActive() && getUserData().role == 'comptabilite';
+    }
+
+    function isControleur() {
+      return isActive() && getUserData().role == 'controleur';
+    }
+
+    // 1. Profils Utilisateurs (Annuaire sécurisé, champs d'identité scellés)
+    match /users/{userId} {
+      allow get: if isAuthenticated() && (request.auth.uid == userId || isDirection());
+      allow list: if isDirection();
+
+      // Création cliente : Direction uniquement, pour rôles subordonnés uniquement (jamais Direction)
+      allow create: if isDirection()
+                    && request.resource.data.keys().hasAll(['uid', 'email', 'nom', 'role', 'statut', 'creeLe'])
+                    && request.resource.data.keys().hasOnly([
+                        'uid', 'email', 'nom', 'prenom', 'role', 'statut',
+                        'grade', 'telephone', 'sitesAssignesIds', 'doitChangerPin',
+                        'derniereConnexion', 'creeLe'
+                    ])
+                    && request.resource.data.uid == userId
+                    && request.resource.data.email is string
+                    && request.resource.data.nom is string
+                    && request.resource.data.role in ['controleur', 'comptabilite']
+                    && request.resource.data.statut in ['actif', 'desactive'];
+
+      // Mise à jour : Direction uniquement, liste blanche stricte
+      // Rôle, UID, Email et Date de création STRICTEMENT IMMUABLES
+      allow update: if isDirection()
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                        'statut', 'sitesAssignesIds', 'nom', 'prenom',
+                        'grade', 'telephone', 'doitChangerPin', 'derniereConnexion'
+                    ])
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['statut']) 
+                        || request.resource.data.statut in ['actif', 'desactive'])
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['nom']) 
+                        || (request.resource.data.nom is string && request.resource.data.nom.size() >= 2))
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['sitesAssignesIds']) 
+                        || request.resource.data.sitesAssignesIds is list);
+
+      allow delete: if false;
+    }
+
+    // 2. Journal Immuable des Pointages de Ronde
+    match /patrol_scans/{scanId} {
+      // Lecture unitaire : profil actif requis (Direction, Comptabilité ou contrôleur propriétaire)
+      allow get: if isActive() && (isDirection() || isCompta() || resource.data.controleurId == request.auth.uid);
+      allow list: if isDirection() || isCompta();
+
+      // Création : STRICTEMENT réservée au rôle 'controleur' ACTIF, horodaté et typé pour son propre UID
+      allow create: if isControleur()
+                    && request.resource.data.keys().hasAll([
+                        'id', 'siteId', 'pointId', 'controleurId',
+                        'scanneLe', 'statutConformite', 'statutSynchro', 'creeLe'
+                    ])
+                    && request.resource.data.keys().hasOnly([
+                        'id', 'siteId', 'siteNom', 'pointId', 'pointNom',
+                        'controleurId', 'controleurNom', 'controleurGrade',
+                        'scanneLe', 'horaireScan', 'dateScan', 'statutConformite',
+                        'observations', 'statutSynchro', 'creeLe', 'synchroniseLe'
+                    ])
+                    && request.resource.data.id == scanId
+                    && request.resource.data.controleurId == request.auth.uid
+                    && request.resource.data.siteId is string
+                    && request.resource.data.pointId is string
+                    && request.resource.data.scanneLe is string
+                    && request.resource.data.statutConformite in [
+                        'Conforme', 'En retard', 'Hors plage horaire', 'Point répété'
+                    ]
+                    && request.resource.data.statutSynchro in ['synchronise', 'en_attente'];
+
+      // Mise à jour : champs techniques uniquement, réservée au contrôleur propriétaire ACTIF
+      allow update: if isActive()
+                    && resource.data.controleurId == request.auth.uid
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                        'statutSynchro', 'synchroniseLe'
+                    ])
+                    && request.resource.data.statutSynchro in ['synchronise', 'en_attente'];
+
+      allow delete: if false;
+    }
+
+    // 3. Points de Contrôle QR de Ronde
+    match /patrol_checkpoints/{checkpointId} {
+      allow get, list: if isActive();
+
+      allow create: if isDirection()
+                    && request.resource.data.keys().hasAll(['id', 'siteId', 'nom', 'qrPayload', 'estActif', 'creeLe'])
+                    && request.resource.data.keys().hasOnly([
+                        'id', 'siteId', 'siteNom', 'nom', 'emplacement',
+                        'consignes', 'ordre', 'qrPayload', 'estActif', 'creeLe'
+                    ])
+                    && request.resource.data.id == checkpointId
+                    && request.resource.data.siteId is string
+                    && request.resource.data.nom is string
+                    && request.resource.data.estActif is bool;
+
+      allow update: if isDirection()
+                    && request.resource.data.id == resource.data.id
+                    && request.resource.data.siteId == resource.data.siteId
+                    && request.resource.data.creeLe == resource.data.creeLe
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                        'nom', 'siteNom', 'emplacement', 'consignes', 'ordre', 'qrPayload', 'estActif'
+                    ])
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['nom']) 
+                        || (request.resource.data.nom is string && request.resource.data.nom.size() >= 2))
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['siteNom']) 
+                        || request.resource.data.siteNom is string)
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['emplacement']) 
+                        || request.resource.data.emplacement is string)
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['consignes']) 
+                        || request.resource.data.consignes is string)
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['ordre']) 
+                        || (request.resource.data.ordre is int || request.resource.data.ordre is float))
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['qrPayload']) 
+                        || request.resource.data.qrPayload is string)
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['estActif']) 
+                        || request.resource.data.estActif is bool);
+
+      allow delete: if false;
+    }
+
+    // 4. Configuration et Horaires des Rondes
+    match /patrol_rounds_config/{configId} {
+      allow get, list: if isActive();
+
+      allow create: if isDirection()
+                    && request.resource.data.keys().hasAll(['id', 'siteId', 'nomRonde', 'pointsObligatoiresIds', 'actif'])
+                    && request.resource.data.keys().hasOnly([
+                        'id', 'siteId', 'nomRonde', 'heureDebut', 'heureFin',
+                        'pointsObligatoiresIds', 'ordreStrict', 'actif'
+                    ])
+                    && request.resource.data.id == configId
+                    && request.resource.data.siteId is string
+                    && request.resource.data.nomRonde is string
+                    && request.resource.data.pointsObligatoiresIds is list
+                    && request.resource.data.actif is bool;
+
+      allow update: if isDirection()
+                    && request.resource.data.id == resource.data.id
+                    && request.resource.data.siteId == resource.data.siteId
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                        'nomRonde', 'heureDebut', 'heureFin', 'pointsObligatoiresIds', 'ordreStrict', 'actif'
+                    ])
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['nomRonde']) 
+                        || (request.resource.data.nomRonde is string && request.resource.data.nomRonde.size() >= 2))
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['heureDebut']) 
+                        || request.resource.data.heureDebut is string)
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['heureFin']) 
+                        || request.resource.data.heureFin is string)
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['pointsObligatoiresIds']) 
+                        || request.resource.data.pointsObligatoiresIds is list)
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['ordreStrict']) 
+                        || request.resource.data.ordreStrict is bool)
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['actif']) 
+                        || request.resource.data.actif is bool);
+
+      allow delete: if false;
+    }
+
+    // 5. Verrouillage absolu par défaut de toute autre collection
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

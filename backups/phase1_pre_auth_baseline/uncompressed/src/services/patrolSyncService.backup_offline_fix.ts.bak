@@ -1,0 +1,222 @@
+import {
+  collection,
+  doc,
+  setDoc,
+  getDocs,
+  onSnapshot,
+  query,
+  orderBy,
+  limit,
+} from 'firebase/firestore';
+import { db } from '../firebase';
+import { ScanPointControle, PointControleSite, ProgrammeRondeSite } from '../types';
+import { STORAGE_KEYS, safeLoadFromStorage, safeSaveToStorage } from '../utils/storageUtils';
+
+/**
+ * Service de synchronisation des rondes entre le terrain (Contrôleurs) et le siège (Direction).
+ * Fonctionne en architecture "Offline-First" :
+ * 1. Consigne immédiatement le scan dans le localStorage du smartphone (garantie 100% hors-ligne).
+ * 2. Transmet le scan de manière transparente à Firestore dès que le réseau est accessible.
+ * 3. Assure une écriture idempotente (clé unique) pour éliminer tout risque de doublon.
+ */
+
+// Écouteur en temps réel pour l'espace Direction
+export function subscribeToLivePatrolScans(
+  onUpdate: (scans: ScanPointControle[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  try {
+    const scansRef = collection(db, 'patrol_scans');
+    const q = query(scansRef, orderBy('scanneLe', 'desc'), limit(150));
+
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const liveScans: ScanPointControle[] = [];
+        snapshot.forEach((docSnap) => {
+          liveScans.push(docSnap.data() as ScanPointControle);
+        });
+
+        // Fusionner avec les scans locaux en attente
+        const localScansRes = safeLoadFromStorage<ScanPointControle[]>(STORAGE_KEYS.PATROL_SCANS, []);
+        const mergedMap = new Map<string, ScanPointControle>();
+
+        // Les scans locaux prédominent s'ils sont plus récents ou en attente
+        localScansRes.data.forEach((s) => mergedMap.set(s.id, s));
+        liveScans.forEach((s) => mergedMap.set(s.id, s));
+
+        const result = Array.from(mergedMap.values()).sort(
+          (a, b) => new Date(b.scanneLe).getTime() - new Date(a.scanneLe).getTime()
+        );
+
+        onUpdate(result);
+      },
+      (err) => {
+        console.warn('[NIGER SÉCURITÉ Sync] Écoute Firestore en mode dégradé local:', err);
+        // Fallback local en cas de problème réseau
+        const fallback = safeLoadFromStorage<ScanPointControle[]>(STORAGE_KEYS.PATROL_SCANS, []).data;
+        onUpdate(fallback);
+        if (onError) onError(err);
+      }
+    );
+
+    return unsubscribe;
+  } catch (err) {
+    console.error('[NIGER SÉCURITÉ Sync] Erreur initialisation abonnement scans:', err);
+    const fallback = safeLoadFromStorage<ScanPointControle[]>(STORAGE_KEYS.PATROL_SCANS, []).data;
+    onUpdate(fallback);
+    return () => {};
+  }
+}
+
+/**
+ * Enregistre un scan de ronde avec priorité locale et synchronisation Firestore en tâche de fond.
+ */
+export async function recordPatrolScan(scan: ScanPointControle): Promise<{
+  success: boolean;
+  synced: boolean;
+  scan: ScanPointControle;
+}> {
+  // 1. Sauvegarde locale immédiate (Offline-First)
+  const currentScans = safeLoadFromStorage<ScanPointControle[]>(STORAGE_KEYS.PATROL_SCANS, []).data;
+  const existingIdx = currentScans.findIndex((s) => s.id === scan.id);
+  const updatedScans = existingIdx >= 0
+    ? currentScans.map((s, idx) => (idx === existingIdx ? scan : s))
+    : [scan, ...currentScans];
+
+  safeSaveToStorage(STORAGE_KEYS.PATROL_SCANS, updatedScans);
+
+  // Ajouter à la file d'attente hors-ligne si non synchronisé
+  const offlineQueue = safeLoadFromStorage<ScanPointControle[]>(STORAGE_KEYS.OFFLINE_SCANS, []).data;
+  if (!offlineQueue.some((s) => s.id === scan.id)) {
+    safeSaveToStorage(STORAGE_KEYS.OFFLINE_SCANS, [...offlineQueue, scan]);
+    notifyQueueChanged();
+  }
+
+  // 2. Tentative de transmission immédiate vers Firestore
+  try {
+    const scanDocRef = doc(db, 'patrol_scans', scan.id);
+    const payloadToCloud = {
+      ...scan,
+      statutSynchro: 'synchronise' as const,
+      synchroniseLe: new Date().toISOString(),
+    };
+
+    await setDoc(scanDocRef, payloadToCloud, { merge: true });
+
+    // Succès cloud : mettre à jour le statut local
+    const finalScan: ScanPointControle = { ...scan, statutSynchro: 'synchronise' };
+    const syncedList = updatedScans.map((s) => (s.id === scan.id ? finalScan : s));
+    safeSaveToStorage(STORAGE_KEYS.PATROL_SCANS, syncedList);
+
+    // Retirer de la file hors-ligne
+    const remainingQueue = safeLoadFromStorage<ScanPointControle[]>(STORAGE_KEYS.OFFLINE_SCANS, [])
+      .data.filter((s) => s.id !== scan.id);
+    safeSaveToStorage(STORAGE_KEYS.OFFLINE_SCANS, remainingQueue);
+    notifyQueueChanged();
+
+    return { success: true, synced: true, scan: finalScan };
+  } catch (cloudErr) {
+    console.warn('[NIGER SÉCURITÉ Sync] Réseau indisponible, scan conservé hors-ligne:', cloudErr);
+    return { success: true, synced: false, scan };
+  }
+}
+
+/**
+ * Tente de vider la file d'attente hors-ligne et synchronise tous les scans en attente vers Firestore.
+ */
+export async function flushOfflineScansQueue(): Promise<{
+  syncedCount: number;
+  remainingCount: number;
+}> {
+  const offlineQueue = safeLoadFromStorage<ScanPointControle[]>(STORAGE_KEYS.OFFLINE_SCANS, []).data;
+  if (offlineQueue.length === 0) {
+    return { syncedCount: 0, remainingCount: 0 };
+  }
+
+  let syncedCount = 0;
+  const remaining: ScanPointControle[] = [];
+
+  for (const scan of offlineQueue) {
+    try {
+      const scanDocRef = doc(db, 'patrol_scans', scan.id);
+      await setDoc(
+        scanDocRef,
+        {
+          ...scan,
+          statutSynchro: 'synchronise',
+          synchroniseLe: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+      syncedCount++;
+    } catch (err) {
+      remaining.push(scan);
+    }
+  }
+
+  safeSaveToStorage(STORAGE_KEYS.OFFLINE_SCANS, remaining);
+  notifyQueueChanged();
+
+  // Mettre à jour la liste générale locale
+  if (syncedCount > 0) {
+    const allScans = safeLoadFromStorage<ScanPointControle[]>(STORAGE_KEYS.PATROL_SCANS, []).data;
+    const remainingIds = new Set(remaining.map((r) => r.id));
+    const updatedAll = allScans.map((s) => {
+      if (!remainingIds.has(s.id) && s.statutSynchro === 'en_attente') {
+        return { ...s, statutSynchro: 'synchronise' as const };
+      }
+      return s;
+    });
+    safeSaveToStorage(STORAGE_KEYS.PATROL_SCANS, updatedAll);
+  }
+
+  return { syncedCount, remainingCount: remaining.length };
+}
+
+// Gestion des observateurs réactifs pour la file d'attente hors-ligne
+type QueueListener = (queue: ScanPointControle[]) => void;
+const queueListeners: Set<QueueListener> = new Set();
+
+export function getOfflineQueue(): ScanPointControle[] {
+  return safeLoadFromStorage<ScanPointControle[]>(STORAGE_KEYS.OFFLINE_SCANS, []).data;
+}
+
+export function getOfflineQueueCount(): number {
+  return getOfflineQueue().length;
+}
+
+export function subscribeToOfflineQueue(listener: QueueListener): () => void {
+  queueListeners.add(listener);
+  // Émission initiale immédiate
+  try {
+    listener(getOfflineQueue());
+  } catch (e) {
+    console.warn('[NIGER SÉCURITÉ Sync] Erreur émission initiale file:', e);
+  }
+
+  return () => {
+    queueListeners.delete(listener);
+  };
+}
+
+function notifyQueueChanged() {
+  const currentQueue = getOfflineQueue();
+  queueListeners.forEach((listener) => {
+    try {
+      listener(currentQueue);
+    } catch (e) {
+      console.warn('[NIGER SÉCURITÉ Sync] Erreur notification auditeur file:', e);
+    }
+  });
+}
+
+// Synchronisation automatique native au rétablissement de la connexion
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    console.log('[NIGER SÉCURITÉ Sync] Connexion rétablie (online). Déclenchement de la synchronisation automatique...');
+    flushOfflineScansQueue().catch((err) => {
+      console.warn('[NIGER SÉCURITÉ Sync] Échec synchro automatique de reconnexion:', err);
+    });
+  });
+}

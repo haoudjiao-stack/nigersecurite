@@ -1,0 +1,78 @@
+{
+  "entities": {
+    "PatrolCheckpoint": {
+      "title": "Point de Contrôle de Ronde",
+      "description": "Repère physique équipé d'un QR-Code fixe à scanner lors des rondes sur site",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "siteId": { "type": "string" },
+        "siteNom": { "type": "string" },
+        "nom": { "type": "string" },
+        "emplacement": { "type": "string" },
+        "consignes": { "type": "string" },
+        "ordre": { "type": "number" },
+        "qrPayload": { "type": "string" },
+        "estActif": { "type": "boolean" },
+        "creeLe": { "type": "string" }
+      },
+      "required": ["id", "siteId", "nom", "qrPayload", "estActif"]
+    },
+    "PatrolScan": {
+      "title": "Scan de Point de Ronde",
+      "description": "Enregistrement certifié et horodaté du passage d'un contrôleur sur un point de contrôle",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "siteId": { "type": "string" },
+        "siteNom": { "type": "string" },
+        "pointId": { "type": "string" },
+        "pointNom": { "type": "string" },
+        "controleurId": { "type": "string" },
+        "controleurNom": { "type": "string" },
+        "controleurGrade": { "type": "string" },
+        "scanneLe": { "type": "string" },
+        "horaireScan": { "type": "string" },
+        "dateScan": { "type": "string" },
+        "statutConformite": {
+          "type": "string",
+          "enum": ["Conforme", "En retard", "Hors plage horaire", "Point répété"]
+        },
+        "observations": { "type": "string" },
+        "estSynchronise": { "type": "boolean" },
+        "creeLe": { "type": "string" }
+      },
+      "required": ["id", "siteId", "pointId", "controleurId", "scanneLe", "statutConformite"]
+    },
+    "PatrolRoundConfig": {
+      "title": "Configuration de Ronde Programmée",
+      "description": "Programme et grille horaire des rondes attendues sur un site de gardiennage",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "siteId": { "type": "string" },
+        "nomRonde": { "type": "string" },
+        "heureDebut": { "type": "string" },
+        "heureFin": { "type": "string" },
+        "pointsObligatoiresIds": { "type": "array" },
+        "ordreStrict": { "type": "boolean" },
+        "actif": { "type": "boolean" }
+      },
+      "required": ["id", "siteId", "nomRonde", "heureDebut", "heureFin"]
+    }
+  },
+  "firestore": {
+    "/patrol_checkpoints/{checkpointId}": {
+      "schema": "PatrolCheckpoint",
+      "description": "Points de contrôle fixes avec QR-Codes pour les sites de gardiennage"
+    },
+    "/patrol_scans/{scanId}": {
+      "schema": "PatrolScan",
+      "description": "Historique certifié des scans de points de ronde transmis par les contrôleurs"
+    },
+    "/patrol_rounds_config/{configId}": {
+      "schema": "PatrolRoundConfig",
+      "description": "Programmes et plages horaires des rondes par site définis par la Direction"
+    }
+  }
+}
