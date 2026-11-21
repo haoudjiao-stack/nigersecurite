@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { promisify } from 'util';
-import { getFirestore, Firestore } from 'firebase-admin/firestore';
+import { getFirestore, Firestore, Transaction } from 'firebase-admin/firestore';
 import { getApps, initializeApp } from 'firebase-admin/app';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -414,7 +414,7 @@ export async function recordFailedAttemptServer(
       const db = getServerFirestore();
       const lockoutRef = db.collection('server_auth_lockouts').doc(uid);
 
-      return await db.runTransaction(async (transaction) => {
+      return await db.runTransaction(async (transaction: Transaction) => {
         const snap = await transaction.get(lockoutRef);
         const current: LockoutRecord = snap.exists
           ? (snap.data() as LockoutRecord)
@@ -726,7 +726,7 @@ export async function consumeActionTicket(params: {
         const db = getServerFirestore();
         const ticketRef = db.collection('server_action_tickets').doc(ticketId);
 
-        return await db.runTransaction(async (transaction) => {
+        return await db.runTransaction(async (transaction: Transaction) => {
           const snap = await transaction.get(ticketRef);
           if (!snap.exists) {
             return { valid: false, error: 'Ticket d’autorisation introuvable ou invalide.' };
