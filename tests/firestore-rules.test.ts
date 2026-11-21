@@ -6,7 +6,7 @@ import {
   assertSucceeds,
 } from '@firebase/rules-unit-testing';
 import * as fs from 'fs';
-import { doc, getDoc, setDoc, updateDoc, collection, getDocs, query, where, writeBatch } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs, query, where, writeBatch } from 'firebase/firestore';
 
 describe('Tests de Sécurité Firestore - NigerSécurité', () => {
   let testEnv: RulesTestEnvironment;
@@ -754,6 +754,551 @@ describe('Tests de Sécurité Firestore - NigerSécurité', () => {
     // h) Contrôleur CLIENT-002 ne peut PAS lire un checkpoint ou scan NIGERSECURITE-001 même si siteId == 'site-1'
     await assertFails(getDoc(doc(ctrlClient2Db, 'patrol_checkpoints', 'cp-ref-1')));
     await assertFails(getDoc(doc(ctrlClient2Db, 'patrol_scans', 'scan-ref-1')));
+  });
+
+  // TEST 18 : Refus strict de toutes les suppressions (allow delete: if false / allow write: if false) et des écritures anonymes
+  it('18. Rejette toute suppression (deleteDoc) par tous les rôles sur toutes les collections ainsi que toute écriture anonyme', async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const adminDb = context.firestore();
+      await setDoc(doc(adminDb, 'login_identifiers', 'CPT-2026-018'), {
+        loginId: 'CPT-2026-018',
+        uid: COMPTA_UID,
+        entrepriseId: 'NIGERSECURITE-001',
+        role: 'comptabilite',
+        statut: 'actif',
+        creeLe: '2026-11-18T00:00:00.000Z',
+        creeParUid: DIR_READY_UID,
+      });
+      await setDoc(doc(adminDb, 'patrol_rounds_config', 'cfg-del-1'), {
+        id: 'cfg-del-1',
+        siteId: 'site-1',
+        nomRonde: 'Ronde Suppression Test',
+        pointsObligatoiresIds: ['cp-ref-1'],
+        actif: true,
+      });
+      await setDoc(doc(adminDb, 'validations_paie', 'val-del-1'), {
+        id: 'val-del-1',
+        montantTotal: 1200000,
+        statut: 'VALIDEE',
+      });
+    });
+
+    const dirDb = testEnv.authenticatedContext(DIR_READY_UID).firestore();
+    const comptaDb = testEnv.authenticatedContext(COMPTA_UID).firestore();
+    const ctrlDb = testEnv.authenticatedContext(CTRL_UID).firestore();
+    const anonDb = testEnv.unauthenticatedContext().firestore();
+
+    // Direction opérationnelle : aucune suppression autorisée
+    await assertFails(deleteDoc(doc(dirDb, 'users', CTRL_UID)));
+    await assertFails(deleteDoc(doc(dirDb, 'users', DIR_READY_UID)));
+    await assertFails(deleteDoc(doc(dirDb, 'login_identifiers', 'CPT-2026-018')));
+    await assertFails(deleteDoc(doc(dirDb, 'patrol_scans', 'scan-ref-1')));
+    await assertFails(deleteDoc(doc(dirDb, 'patrol_checkpoints', 'cp-ref-1')));
+    await assertFails(deleteDoc(doc(dirDb, 'patrol_rounds_config', 'cfg-del-1')));
+    await assertFails(deleteDoc(doc(dirDb, 'validations_paie', 'val-del-1')));
+
+    // Contrôleur : impossible de supprimer son propre scan ou son propre profil
+    await assertFails(deleteDoc(doc(ctrlDb, 'patrol_scans', 'scan-ref-1')));
+    await assertFails(deleteDoc(doc(ctrlDb, 'users', CTRL_UID)));
+
+    // Comptabilité : impossible de supprimer une validation de paie ou un scan
+    await assertFails(deleteDoc(doc(comptaDb, 'validations_paie', 'val-del-1')));
+    await assertFails(deleteDoc(doc(comptaDb, 'patrol_scans', 'scan-ref-1')));
+
+    // Utilisateur anonyme : aucune écriture ni suppression autorisée
+    await assertFails(deleteDoc(doc(anonDb, 'patrol_scans', 'scan-ref-1')));
+    await assertFails(
+      setDoc(doc(anonDb, 'patrol_checkpoints', 'cp-anon'), {
+        id: 'cp-anon',
+        siteId: 'site-1',
+        nom: 'Point Anonyme',
+        qrPayload: 'ANON-1',
+        estActif: true,
+        creeLe: '2026-11-18T00:00:00.000Z',
+      })
+    );
+    await assertFails(
+      setDoc(doc(anonDb, 'users', 'anon-uid'), {
+        uid: 'anon-uid',
+        email: 'anon@nigersecurite.ne',
+        nom: 'Anonyme',
+        role: 'direction',
+        statut: 'actif',
+        creeLe: '2026-11-18T00:00:00.000Z',
+      })
+    );
+  });
+
+  // TEST 19 : Modifications autorisées et interdites sur /login_identifiers/{loginId}
+  it('19. Contrôle strictement les mises à jour autorisées (statut uniquement) et interdites de /login_identifiers', async () => {
+    const DIR_CLIENT2_UID = 'dir_client2_t19';
+
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const adminDb = context.firestore();
+      await setDoc(doc(adminDb, 'users', DIR_CLIENT2_UID), {
+        uid: DIR_CLIENT2_UID,
+        email: 'dir.t19@client2.ne',
+        entrepriseId: 'CLIENT-002',
+        nom: 'Direction Client 2 T19',
+        role: 'direction',
+        statut: 'actif',
+        doitChangerPin: false,
+        creeLe: '2026-11-18T00:00:00.000Z',
+      });
+      await setDoc(doc(adminDb, 'login_identifiers', 'CPT-2026-020'), {
+        loginId: 'CPT-2026-020',
+        uid: 'staff_cpt_020',
+        entrepriseId: 'NIGERSECURITE-001',
+        role: 'comptabilite',
+        statut: 'actif',
+        creeLe: '2026-11-18T00:00:00.000Z',
+        creeParUid: DIR_READY_UID,
+      });
+      await setDoc(doc(adminDb, 'login_identifiers', 'CPT-2026-021'), {
+        loginId: 'CPT-2026-021',
+        uid: 'staff_cpt_021',
+        entrepriseId: 'CLIENT-002',
+        role: 'comptabilite',
+        statut: 'actif',
+        creeLe: '2026-11-18T00:00:00.000Z',
+        creeParUid: DIR_CLIENT2_UID,
+      });
+    });
+
+    const dirNsDb = testEnv.authenticatedContext(DIR_READY_UID).firestore();
+    const dirPendingDb = testEnv.authenticatedContext(DIR_PENDING_UID).firestore();
+    const comptaDb = testEnv.authenticatedContext(COMPTA_UID).firestore();
+    const ctrlDb = testEnv.authenticatedContext(CTRL_UID).firestore();
+    const dirClient2Db = testEnv.authenticatedContext(DIR_CLIENT2_UID).firestore();
+
+    // Autorisé : Direction prête de la même entreprise peut uniquement basculer statut (actif <-> desactive)
+    await assertSucceeds(updateDoc(doc(dirNsDb, 'login_identifiers', 'CPT-2026-020'), { statut: 'desactive' }));
+    await assertSucceeds(updateDoc(doc(dirNsDb, 'login_identifiers', 'CPT-2026-020'), { statut: 'actif' }));
+
+    // Interdit : altération des champs scellés, statut hors enum ou ajout de champ
+    await assertFails(updateDoc(doc(dirNsDb, 'login_identifiers', 'CPT-2026-020'), { uid: 'autre_uid' }));
+    await assertFails(updateDoc(doc(dirNsDb, 'login_identifiers', 'CPT-2026-020'), { role: 'controleur' }));
+    await assertFails(updateDoc(doc(dirNsDb, 'login_identifiers', 'CPT-2026-020'), { loginId: 'CPT-2026-999' }));
+    await assertFails(updateDoc(doc(dirNsDb, 'login_identifiers', 'CPT-2026-020'), { entrepriseId: 'CLIENT-002' }));
+    await assertFails(updateDoc(doc(dirNsDb, 'login_identifiers', 'CPT-2026-020'), { creeLe: '2025-01-01T00:00:00.000Z' }));
+    await assertFails(updateDoc(doc(dirNsDb, 'login_identifiers', 'CPT-2026-020'), { creeParUid: DIR_OTHER_UID }));
+    await assertFails(updateDoc(doc(dirNsDb, 'login_identifiers', 'CPT-2026-020'), { statut: 'suspendu' }));
+    await assertFails(updateDoc(doc(dirNsDb, 'login_identifiers', 'CPT-2026-020'), { statut: 'desactive', note: 'extra' }));
+
+    // Interdit : Direction sans PIN validé, Comptabilité ou Contrôleur
+    await assertFails(getDoc(doc(dirPendingDb, 'login_identifiers', 'CPT-2026-020')));
+    await assertFails(updateDoc(doc(dirPendingDb, 'login_identifiers', 'CPT-2026-020'), { statut: 'desactive' }));
+    await assertFails(getDoc(doc(comptaDb, 'login_identifiers', 'CPT-2026-020')));
+    await assertFails(getDocs(collection(comptaDb, 'login_identifiers')));
+    await assertFails(updateDoc(doc(comptaDb, 'login_identifiers', 'CPT-2026-020'), { statut: 'desactive' }));
+    await assertFails(getDoc(doc(ctrlDb, 'login_identifiers', 'CPT-2026-020')));
+    await assertFails(updateDoc(doc(ctrlDb, 'login_identifiers', 'CPT-2026-020'), { statut: 'desactive' }));
+
+    // Interdit : accès ou mise à jour inter-entreprises dans les deux sens
+    await assertFails(getDoc(doc(dirClient2Db, 'login_identifiers', 'CPT-2026-020')));
+    await assertFails(updateDoc(doc(dirClient2Db, 'login_identifiers', 'CPT-2026-020'), { statut: 'desactive' }));
+    await assertFails(getDoc(doc(dirNsDb, 'login_identifiers', 'CPT-2026-021')));
+    await assertFails(updateDoc(doc(dirNsDb, 'login_identifiers', 'CPT-2026-021'), { statut: 'desactive' }));
+  });
+
+  // TEST 20 : Couverture complète du rôle Comptabilité (lectures autorisées, écritures interdites, révocation et isolation)
+  it('20. Vérifie les permissions complètes du rôle Comptabilité (lectures métier, doitChangerCodeSecret, refus d’écritures et révocation)', async () => {
+    const COMPTA_CLIENT2_UID = 'compta_client2_t20';
+
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const adminDb = context.firestore();
+      await setDoc(doc(adminDb, 'patrol_rounds_config', 'cfg-compta-1'), {
+        id: 'cfg-compta-1',
+        siteId: 'site-1',
+        nomRonde: 'Ronde Suivi Compta',
+        pointsObligatoiresIds: ['cp-ref-1'],
+        actif: true,
+      });
+      await setDoc(doc(adminDb, 'validations_paie', 'val-compta-ns'), {
+        id: 'val-compta-ns',
+        montantTotal: 1800000,
+        statut: 'VALIDEE',
+      });
+      await setDoc(doc(adminDb, 'validations_paie', 'val-compta-c2'), {
+        id: 'val-compta-c2',
+        entrepriseId: 'CLIENT-002',
+        montantTotal: 950000,
+        statut: 'VALIDEE',
+      });
+      await setDoc(doc(adminDb, 'users', COMPTA_CLIENT2_UID), {
+        uid: COMPTA_CLIENT2_UID,
+        email: 'cpt-2026-520@acces.nigersecurite.ne',
+        loginId: 'CPT-2026-520',
+        entrepriseId: 'CLIENT-002',
+        nom: 'Comptable Client 2',
+        role: 'comptabilite',
+        statut: 'actif',
+        creeLe: '2026-11-18T00:00:00.000Z',
+      });
+      await setDoc(doc(adminDb, 'preparations_paie', 'prep-secret-1'), {
+        id: 'prep-secret-1',
+        montantTotal: 1800000,
+      });
+    });
+
+    const comptaDb = testEnv.authenticatedContext(COMPTA_UID).firestore();
+    const comptaClient2Db = testEnv.authenticatedContext(COMPTA_CLIENT2_UID).firestore();
+    const dirDb = testEnv.authenticatedContext(DIR_READY_UID).firestore();
+
+    // Autorisé pour Comptabilité NIGERSECURITE-001 : lectures métier et passage de son propre doitChangerCodeSecret à false
+    await assertSucceeds(getDoc(doc(comptaDb, 'patrol_scans', 'scan-ref-1')));
+    await assertSucceeds(getDocs(collection(comptaDb, 'patrol_scans')));
+    await assertSucceeds(getDoc(doc(comptaDb, 'patrol_checkpoints', 'cp-ref-1')));
+    await assertSucceeds(getDocs(collection(comptaDb, 'patrol_checkpoints')));
+    await assertSucceeds(getDoc(doc(comptaDb, 'patrol_rounds_config', 'cfg-compta-1')));
+    await assertSucceeds(getDocs(collection(comptaDb, 'patrol_rounds_config')));
+    await assertSucceeds(getDoc(doc(comptaDb, 'validations_paie', 'val-compta-ns')));
+    await assertSucceeds(getDocs(collection(comptaDb, 'validations_paie')));
+    await assertSucceeds(updateDoc(doc(comptaDb, 'users', COMPTA_UID), { doitChangerCodeSecret: false }));
+
+    // Interdit pour Comptabilité : auto-modification hors doitChangerCodeSecret=false et toute écriture métier/serveur
+    await assertFails(updateDoc(doc(comptaDb, 'users', COMPTA_UID), { doitChangerCodeSecret: true }));
+    await assertFails(updateDoc(doc(comptaDb, 'users', COMPTA_UID), { nom: 'AutoModif Compta' }));
+    await assertFails(updateDoc(doc(comptaDb, 'users', COMPTA_UID), { statut: 'desactive' }));
+    await assertFails(updateDoc(doc(comptaDb, 'users', COMPTA_UID), { entrepriseId: 'CLIENT-002' }));
+    await assertFails(updateDoc(doc(comptaDb, 'users', CTRL_UID), { statut: 'desactive' }));
+    await assertFails(
+      setDoc(doc(comptaDb, 'patrol_scans', 'scan-compta-interdit'), {
+        id: 'scan-compta-interdit',
+        siteId: 'site-1',
+        pointId: 'cp-ref-1',
+        controleurId: COMPTA_UID,
+        scanneLe: '2026-11-18T09:00:00.000Z',
+        statutConformite: 'Conforme',
+        statutSynchro: 'synchronise',
+        creeLe: '2026-11-18T09:00:00.000Z',
+      })
+    );
+    await assertFails(
+      setDoc(doc(comptaDb, 'patrol_checkpoints', 'cp-compta-interdit'), {
+        id: 'cp-compta-interdit',
+        siteId: 'site-1',
+        nom: 'Point Interdit',
+        qrPayload: 'CPT-FORBIDDEN',
+        estActif: true,
+        creeLe: '2026-11-18T09:00:00.000Z',
+      })
+    );
+    await assertFails(updateDoc(doc(comptaDb, 'patrol_checkpoints', 'cp-ref-1'), { nom: 'Modif Compta' }));
+    await assertFails(updateDoc(doc(comptaDb, 'patrol_rounds_config', 'cfg-compta-1'), { actif: false }));
+    await assertFails(
+      setDoc(doc(comptaDb, 'validations_paie', 'val-compta-fraude'), {
+        id: 'val-compta-fraude',
+        montantTotal: 9999999,
+        statut: 'VALIDEE',
+      })
+    );
+    await assertFails(getDoc(doc(comptaDb, 'preparations_paie', 'prep-secret-1')));
+    await assertFails(getDoc(doc(comptaDb, 'server_auth_secrets', DIR_READY_UID)));
+
+    // Comptabilité CLIENT-002 : bloquée sur NIGERSECURITE-001 et sur list non filtré, autorisée sur son entreprise filtrée
+    await assertFails(getDoc(doc(comptaClient2Db, 'validations_paie', 'val-compta-ns')));
+    await assertFails(getDoc(doc(comptaClient2Db, 'patrol_scans', 'scan-ref-1')));
+    await assertFails(getDocs(collection(comptaClient2Db, 'validations_paie')));
+    await assertSucceeds(getDoc(doc(comptaClient2Db, 'validations_paie', 'val-compta-c2')));
+    await assertSucceeds(
+      getDocs(query(collection(comptaClient2Db, 'validations_paie'), where('entrepriseId', '==', 'CLIENT-002')))
+    );
+
+    // Révocation par la Direction : bloque immédiatement toutes les lectures et mises à jour de la Comptabilité
+    await assertSucceeds(updateDoc(doc(dirDb, 'users', COMPTA_UID), { statut: 'desactive' }));
+    await assertFails(getDoc(doc(comptaDb, 'validations_paie', 'val-compta-ns')));
+    await assertFails(getDocs(collection(comptaDb, 'patrol_scans')));
+    await assertFails(updateDoc(doc(comptaDb, 'users', COMPTA_UID), { doitChangerCodeSecret: false }));
+  });
+
+  // TEST 21 : Cloisonnement strict entre deux contrôleurs affectés au MÊME site
+  it('21. Empêche un contrôleur d’accéder aux données ou scans d’un autre contrôleur même sur un site partagé', async () => {
+    const CTRL_B_UID = 'controleur_b_uid';
+
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const adminDb = context.firestore();
+      await setDoc(doc(adminDb, 'users', CTRL_B_UID), {
+        uid: CTRL_B_UID,
+        email: 'ctr-2026-021@acces.nigersecurite.ne',
+        loginId: 'CTR-2026-021',
+        entrepriseId: 'NIGERSECURITE-001',
+        nom: 'Second Contrôleur Terrain',
+        role: 'controleur',
+        statut: 'actif',
+        sitesAssignesIds: ['site-1'], // Même site assigné que CTRL_UID
+        creeLe: '2026-11-18T00:00:00.000Z',
+      });
+      await setDoc(doc(adminDb, 'patrol_scans', 'scan-ctrl-b'), {
+        id: 'scan-ctrl-b',
+        siteId: 'site-1',
+        pointId: 'cp-ref-1',
+        controleurId: CTRL_B_UID,
+        scanneLe: '2026-11-18T07:30:00.000Z',
+        statutConformite: 'Conforme',
+        statutSynchro: 'en_attente',
+        creeLe: '2026-11-18T07:30:00.000Z',
+      });
+    });
+
+    const ctrlADb = testEnv.authenticatedContext(CTRL_UID).firestore();
+    const ctrlBDb = testEnv.authenticatedContext(CTRL_B_UID).firestore();
+
+    // Autorisé : chaque contrôleur peut mettre à jour les champs techniques de SON propre scan sur son site assigné
+    await assertSucceeds(
+      updateDoc(doc(ctrlADb, 'patrol_scans', 'scan-ref-1'), {
+        statutSynchro: 'synchronise',
+        synchroniseLe: '2026-11-18T08:00:00.000Z',
+      })
+    );
+    await assertSucceeds(getDoc(doc(ctrlBDb, 'patrol_scans', 'scan-ctrl-b')));
+    await assertSucceeds(
+      updateDoc(doc(ctrlBDb, 'patrol_scans', 'scan-ctrl-b'), {
+        statutSynchro: 'synchronise',
+      })
+    );
+
+    // Interdit : CTRL_A ne peut ni lire ni modifier le scan de CTRL_B même sur le même site-1
+    await assertFails(getDoc(doc(ctrlADb, 'patrol_scans', 'scan-ctrl-b')));
+    await assertFails(updateDoc(doc(ctrlADb, 'patrol_scans', 'scan-ctrl-b'), { statutSynchro: 'synchronise' }));
+
+    // Interdit : usurpation d'un autre controleurId à la création d'un scan
+    await assertFails(
+      setDoc(doc(ctrlADb, 'patrol_scans', 'scan-usurpation-ctrl-b'), {
+        id: 'scan-usurpation-ctrl-b',
+        siteId: 'site-1',
+        pointId: 'cp-ref-1',
+        controleurId: CTRL_B_UID,
+        scanneLe: '2026-11-18T08:10:00.000Z',
+        statutConformite: 'Conforme',
+        statutSynchro: 'synchronise',
+        creeLe: '2026-11-18T08:10:00.000Z',
+      })
+    );
+
+    // Interdit : altération de champs métier sur son propre scan, listage des scans, lecture du profil d'un autre contrôleur ou écriture checkpoints
+    await assertFails(updateDoc(doc(ctrlADb, 'patrol_scans', 'scan-ref-1'), { observations: 'Altération interdite' }));
+    await assertFails(updateDoc(doc(ctrlADb, 'patrol_scans', 'scan-ref-1'), { statutConformite: 'En retard' }));
+    await assertFails(updateDoc(doc(ctrlADb, 'patrol_scans', 'scan-ref-1'), { controleurId: CTRL_B_UID }));
+    await assertFails(getDocs(collection(ctrlADb, 'patrol_scans')));
+    await assertFails(getDocs(query(collection(ctrlADb, 'patrol_scans'), where('siteId', '==', 'site-1'))));
+    await assertFails(getDoc(doc(ctrlADb, 'users', CTRL_B_UID)));
+    await assertFails(updateDoc(doc(ctrlADb, 'patrol_checkpoints', 'cp-ref-1'), { nom: 'Modif Contrôleur' }));
+  });
+
+  // TEST 22 : Matrice bidirectionnelle complète NIGERSECURITE-001 <-> CLIENT-002 (incluant la limite documentée de Phase A)
+  it('22. Vérifie l’isolation bidirectionnelle NIGERSECURITE-001 <-> CLIENT-002 sur toutes les collections', async () => {
+    const DIR_CLIENT2_UID = 'dir_client2_t22';
+    const CTRL_CLIENT2_UID = 'ctrl_client2_t22';
+
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const adminDb = context.firestore();
+      await setDoc(doc(adminDb, 'users', DIR_CLIENT2_UID), {
+        uid: DIR_CLIENT2_UID,
+        email: 'dir.t22@client2.ne',
+        entrepriseId: 'CLIENT-002',
+        nom: 'Direction Client 2 T22',
+        role: 'direction',
+        statut: 'actif',
+        doitChangerPin: false,
+        creeLe: '2026-11-18T00:00:00.000Z',
+      });
+      await setDoc(doc(adminDb, 'users', CTRL_CLIENT2_UID), {
+        uid: CTRL_CLIENT2_UID,
+        email: 'ctr-2026-522@acces.nigersecurite.ne',
+        loginId: 'CTR-2026-522',
+        entrepriseId: 'CLIENT-002',
+        nom: 'Contrôleur Client 2 T22',
+        role: 'controleur',
+        statut: 'actif',
+        sitesAssignesIds: ['site-1'],
+        creeLe: '2026-11-18T00:00:00.000Z',
+      });
+      await setDoc(doc(adminDb, 'login_identifiers', 'CTR-2026-522'), {
+        loginId: 'CTR-2026-522',
+        uid: CTRL_CLIENT2_UID,
+        entrepriseId: 'CLIENT-002',
+        role: 'controleur',
+        statut: 'actif',
+        creeLe: '2026-11-18T00:00:00.000Z',
+        creeParUid: DIR_CLIENT2_UID,
+      });
+      await setDoc(doc(adminDb, 'patrol_checkpoints', 'cp-client2-1'), {
+        id: 'cp-client2-1',
+        entrepriseId: 'CLIENT-002',
+        siteId: 'site-1',
+        nom: 'Point Client 2',
+        qrPayload: 'C2-PT-001',
+        estActif: true,
+        creeLe: '2026-11-18T00:00:00.000Z',
+      });
+      await setDoc(doc(adminDb, 'patrol_rounds_config', 'cfg-client2-1'), {
+        id: 'cfg-client2-1',
+        entrepriseId: 'CLIENT-002',
+        siteId: 'site-1',
+        nomRonde: 'Ronde Client 2',
+        pointsObligatoiresIds: ['cp-client2-1'],
+        actif: true,
+      });
+      await setDoc(doc(adminDb, 'patrol_scans', 'scan-client2-1'), {
+        id: 'scan-client2-1',
+        entrepriseId: 'CLIENT-002',
+        siteId: 'site-1',
+        pointId: 'cp-client2-1',
+        controleurId: CTRL_CLIENT2_UID,
+        scanneLe: '2026-11-18T07:00:00.000Z',
+        statutConformite: 'Conforme',
+        statutSynchro: 'en_attente',
+        creeLe: '2026-11-18T07:00:00.000Z',
+      });
+      await setDoc(doc(adminDb, 'validations_paie', 'val-client2-1'), {
+        id: 'val-client2-1',
+        entrepriseId: 'CLIENT-002',
+        montantTotal: 900000,
+        statut: 'VALIDEE',
+      });
+      await setDoc(doc(adminDb, 'patrol_rounds_config', 'cfg-ns-t22'), {
+        id: 'cfg-ns-t22',
+        siteId: 'site-1',
+        nomRonde: 'Ronde NS T22',
+        pointsObligatoiresIds: ['cp-ref-1'],
+        actif: true,
+      });
+      await setDoc(doc(adminDb, 'validations_paie', 'val-ns-t22'), {
+        id: 'val-ns-t22',
+        montantTotal: 1500000,
+        statut: 'VALIDEE',
+      });
+    });
+
+    const dirNsDb = testEnv.authenticatedContext(DIR_READY_UID).firestore();
+    const comptaNsDb = testEnv.authenticatedContext(COMPTA_UID).firestore();
+    const ctrlNsDb = testEnv.authenticatedContext(CTRL_UID).firestore();
+    const dirClient2Db = testEnv.authenticatedContext(DIR_CLIENT2_UID).firestore();
+    const ctrlClient2Db = testEnv.authenticatedContext(CTRL_CLIENT2_UID).firestore();
+
+    // A) Sens NIGERSECURITE-001 -> CLIENT-002 : lectures unitaires (get), mises à jour et créations usurpées REFUSÉES
+    // Note Phase A : canListEntrepriseDoc tolère encore le list non filtré côté NIGERSECURITE-001 jusqu'à la Phase B.
+    await assertFails(getDoc(doc(dirNsDb, 'users', CTRL_CLIENT2_UID)));
+    await assertFails(getDoc(doc(dirNsDb, 'login_identifiers', 'CTR-2026-522')));
+    await assertFails(getDoc(doc(dirNsDb, 'patrol_scans', 'scan-client2-1')));
+    await assertFails(getDoc(doc(dirNsDb, 'patrol_checkpoints', 'cp-client2-1')));
+    await assertFails(getDoc(doc(dirNsDb, 'patrol_rounds_config', 'cfg-client2-1')));
+    await assertFails(getDoc(doc(dirNsDb, 'validations_paie', 'val-client2-1')));
+    await assertFails(updateDoc(doc(dirNsDb, 'users', CTRL_CLIENT2_UID), { statut: 'desactive' }));
+    await assertFails(updateDoc(doc(dirNsDb, 'login_identifiers', 'CTR-2026-522'), { statut: 'desactive' }));
+    await assertFails(updateDoc(doc(dirNsDb, 'patrol_checkpoints', 'cp-client2-1'), { nom: 'Piraté NS' }));
+    await assertFails(updateDoc(doc(dirNsDb, 'patrol_rounds_config', 'cfg-client2-1'), { actif: false }));
+    await assertFails(
+      setDoc(doc(dirNsDb, 'patrol_checkpoints', 'cp-ns-spoof'), {
+        id: 'cp-ns-spoof',
+        entrepriseId: 'CLIENT-002',
+        siteId: 'site-1',
+        nom: 'Usurpation Client 2',
+        qrPayload: 'SPOOF-1',
+        estActif: true,
+        creeLe: '2026-11-18T10:00:00.000Z',
+      })
+    );
+    await assertFails(getDoc(doc(comptaNsDb, 'patrol_scans', 'scan-client2-1')));
+    await assertFails(getDoc(doc(comptaNsDb, 'validations_paie', 'val-client2-1')));
+    await assertFails(getDoc(doc(ctrlNsDb, 'patrol_checkpoints', 'cp-client2-1')));
+    await assertFails(getDoc(doc(ctrlNsDb, 'patrol_rounds_config', 'cfg-client2-1')));
+    await assertFails(getDoc(doc(ctrlNsDb, 'patrol_scans', 'scan-client2-1')));
+    await assertFails(
+      setDoc(doc(ctrlNsDb, 'patrol_scans', 'scan-ns-spoof'), {
+        id: 'scan-ns-spoof',
+        entrepriseId: 'CLIENT-002',
+        siteId: 'site-1',
+        pointId: 'cp-ref-1',
+        controleurId: CTRL_UID,
+        scanneLe: '2026-11-18T10:00:00.000Z',
+        statutConformite: 'Conforme',
+        statutSynchro: 'synchronise',
+        creeLe: '2026-11-18T10:00:00.000Z',
+      })
+    );
+
+    // B) Sens CLIENT-002 -> NIGERSECURITE-001 : get, update, list non filtré, list filtré NS et créations sans entrepriseId REFUSÉS
+    await assertFails(getDoc(doc(dirClient2Db, 'patrol_rounds_config', 'cfg-ns-t22')));
+    await assertFails(getDoc(doc(dirClient2Db, 'validations_paie', 'val-ns-t22')));
+    await assertFails(updateDoc(doc(dirClient2Db, 'patrol_checkpoints', 'cp-ref-1'), { nom: 'Piraté C2' }));
+    await assertFails(updateDoc(doc(dirClient2Db, 'patrol_rounds_config', 'cfg-ns-t22'), { actif: false }));
+    await assertFails(getDocs(collection(dirClient2Db, 'patrol_checkpoints')));
+    await assertFails(getDocs(collection(dirClient2Db, 'patrol_rounds_config')));
+    await assertFails(getDocs(collection(dirClient2Db, 'validations_paie')));
+    await assertFails(
+      getDocs(query(collection(dirClient2Db, 'users'), where('entrepriseId', '==', 'NIGERSECURITE-001')))
+    );
+    // Création sans champ entrepriseId refusée hors NIGERSECURITE-001
+    await assertFails(
+      setDoc(doc(dirClient2Db, 'patrol_checkpoints', 'cp-c2-sans-tenant'), {
+        id: 'cp-c2-sans-tenant',
+        siteId: 'site-1',
+        nom: 'Sans EntrepriseId',
+        qrPayload: 'C2-NOTENANT',
+        estActif: true,
+        creeLe: '2026-11-18T10:00:00.000Z',
+      })
+    );
+    await assertFails(
+      setDoc(doc(ctrlClient2Db, 'patrol_scans', 'scan-c2-sans-tenant'), {
+        id: 'scan-c2-sans-tenant',
+        siteId: 'site-1',
+        pointId: 'cp-client2-1',
+        controleurId: CTRL_CLIENT2_UID,
+        scanneLe: '2026-11-18T10:00:00.000Z',
+        statutConformite: 'Conforme',
+        statutSynchro: 'synchronise',
+        creeLe: '2026-11-18T10:00:00.000Z',
+      })
+    );
+    // Contrôleur CLIENT-002 ne peut pas lister patrol_checkpoints sans filtre entrepriseId == CLIENT-002
+    await assertFails(
+      getDocs(query(collection(ctrlClient2Db, 'patrol_checkpoints'), where('siteId', '==', 'site-1')))
+    );
+
+    // C) Accès légitimes CLIENT-002 -> CLIENT-002 : AUTORISÉS
+    await assertSucceeds(
+      setDoc(doc(dirClient2Db, 'patrol_checkpoints', 'cp-client2-new'), {
+        id: 'cp-client2-new',
+        entrepriseId: 'CLIENT-002',
+        siteId: 'site-1',
+        nom: 'Nouveau Point Client 2',
+        qrPayload: 'C2-PT-NEW',
+        estActif: true,
+        creeLe: '2026-11-18T10:15:00.000Z',
+      })
+    );
+    await assertSucceeds(
+      updateDoc(doc(dirClient2Db, 'patrol_checkpoints', 'cp-client2-1'), { nom: 'Point Client 2 Nord' })
+    );
+    await assertSucceeds(
+      getDocs(query(collection(dirClient2Db, 'patrol_checkpoints'), where('entrepriseId', '==', 'CLIENT-002')))
+    );
+    await assertSucceeds(getDoc(doc(ctrlClient2Db, 'patrol_checkpoints', 'cp-client2-1')));
+    await assertSucceeds(
+      getDocs(
+        query(
+          collection(ctrlClient2Db, 'patrol_checkpoints'),
+          where('siteId', '==', 'site-1'),
+          where('entrepriseId', '==', 'CLIENT-002')
+        )
+      )
+    );
+    await assertSucceeds(
+      setDoc(doc(ctrlClient2Db, 'patrol_scans', 'scan-client2-new'), {
+        id: 'scan-client2-new',
+        entrepriseId: 'CLIENT-002',
+        siteId: 'site-1',
+        pointId: 'cp-client2-1',
+        controleurId: CTRL_CLIENT2_UID,
+        scanneLe: '2026-11-18T10:20:00.000Z',
+        statutConformite: 'Conforme',
+        statutSynchro: 'synchronise',
+        creeLe: '2026-11-18T10:20:00.000Z',
+      })
+    );
   });
 });
 
