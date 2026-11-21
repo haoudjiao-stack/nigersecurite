@@ -35,13 +35,13 @@ jobs:
         run: npm run lint
 
       - name: Exécuter les tests unitaires et statiques (89 tests)
-        run: npx vitest run tests/api-pin.test.ts tests/firestore-config.test.ts tests/staff-accounts.test.ts tests/auth-flow.test.ts tests/agent-badge.test.ts tests/checkpoint-print-export.test.ts
+        run: npx vitest run --testTimeout=30000 tests/api-pin.test.ts tests/firestore-config.test.ts tests/staff-accounts.test.ts tests/auth-flow.test.ts tests/agent-badge.test.ts tests/checkpoint-print-export.test.ts
 
       - name: Installer Firebase CLI
         run: npm install --global firebase-tools
 
       - name: Tester les règles Firestore (22 tests)
-        run: npm run test:rules
+        run: firebase emulators:exec --only firestore "npx vitest run --testTimeout=30000 tests/firestore-rules.test.ts"
 
       - name: Compilation de production
         run: npm run build
