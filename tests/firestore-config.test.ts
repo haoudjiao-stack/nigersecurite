@@ -211,5 +211,28 @@ describe('Vérification statique de la configuration et des règles Firestore Ni
     expect(rules).toMatch(/match\s+\/server_system_state\/\{stateId\}\s*\{\s*allow read, write: if false;\s*\}/);
     expect(rules).toMatch(/match\s+\/preparations_paie\/\{prepId\}\s*\{\s*allow read, write: if false;\s*\}/);
   });
+
+  it('9. Interdit statiquement toute suppression côté client (allow delete: if false) sur chaque collection métier et verrouille le repli par défaut', () => {
+    // Aucune clause allow delete autre que "if false;" ne doit exister dans le fichier
+    expect(rules).not.toMatch(/allow\s+delete:\s*if\s+(?!false;)/);
+
+    const noDeleteCollections = [
+      '/users/{userId}',
+      '/login_identifiers/{loginId}',
+      '/patrol_scans/{scanId}',
+      '/patrol_checkpoints/{checkpointId}',
+      '/patrol_rounds_config/{configId}',
+    ];
+
+    for (const collectionPath of noDeleteCollections) {
+      const escaped = collectionPath.replace(/[/{}]/g, '\\$&');
+      const blockRegex = new RegExp(`match\\s+${escaped}\\s*\\{[\\s\\S]*?allow delete: if false;\\s*\\}`);
+      expect(rules).toMatch(blockRegex);
+    }
+
+    // Validations de paie et repli global strictement fermés en écriture/suppression
+    expect(rules).toMatch(/match\s+\/validations_paie\/\{validationId\}\s*\{[\s\S]*?allow write: if false;\s*\}/);
+    expect(rules).toMatch(/match\s+\/\{document=\*\*\}\s*\{\s*allow read, write: if false;\s*\}/);
+  });
 });
 
