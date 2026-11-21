@@ -496,7 +496,7 @@ export async function getStoredSecretServer(
   if (isTestToken) {
     return serverSecretStore.get(uid) || null;
   }
-  }
+  
 
   try {
     const db = getServerFirestore();
