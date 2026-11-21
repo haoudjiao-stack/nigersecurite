@@ -493,8 +493,9 @@ export async function getStoredSecretServer(
     throw new Error('Erreur simulée de stockage Firestore Admin pour secret.');
   }
 
-  if (isTestToken && serverSecretStore.has(uid)) {
-    return serverSecretStore.get(uid)!;
+  if (isTestToken) {
+    return serverSecretStore.get(uid) || null;
+  }
   }
 
   try {
@@ -931,8 +932,8 @@ export async function fetchPayrollValidationServer(
   payrollId: string,
   isTestToken = false
 ): Promise<PayrollValidationRecord | null> {
-  if (isTestToken && serverPayrollStore.has(payrollId)) {
-    return serverPayrollStore.get(payrollId)!;
+  if (isTestToken) {
+    return serverPayrollStore.get(payrollId) || null;
   }
 
   try {
