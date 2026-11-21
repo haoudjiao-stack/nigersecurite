@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import { initializeApp, getApps } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
+import type { Transaction, QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import {
   getServerFirestore,
   hashLowEntropyPin,
@@ -637,7 +638,7 @@ app.post('/api/auth/bootstrap-profile', async (req: Request, res: Response) => {
       const bootstrapDocRef = db.collection('server_system_state').doc('direction_bootstrap');
       const userDocRef = db.collection('users').doc(authenticatedUid);
 
-      return await db.runTransaction(async (transaction) => {
+      return await db.runTransaction(async (transaction: Transaction) => {
         const bootstrapSnap = await transaction.get(bootstrapDocRef);
         if (bootstrapSnap.exists && bootstrapSnap.data()?.bootstrapped === true && bootstrapSnap.data()?.directionUid !== authenticatedUid) {
           return res.status(403).json({
@@ -647,7 +648,7 @@ app.post('/api/auth/bootstrap-profile', async (req: Request, res: Response) => {
         }
 
         const existingUsersQuery = await db.collection('users').where('role', '==', 'direction').limit(2).get();
-        const hasOtherDirection = existingUsersQuery.docs.some((docSnap) => docSnap.id !== authenticatedUid);
+        const hasOtherDirection = existingUsersQuery.docs.some((docSnap: QueryDocumentSnapshot) => docSnap.id !== authenticatedUid);
         if (hasOtherDirection) {
           return res.status(403).json({
             success: false,
